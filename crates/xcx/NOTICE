@@ -1,0 +1,37 @@
+xcx — exchange–correlation functionals for density-functional theory (pure-Rust, libxc-compatible)
+Copyright (c) 2026 Jiekang Tian and the xcx authors
+
+Licensed under the Mozilla Public License, Version 2.0. The full license text
+is in the accompanying LICENSE file and at https://mozilla.org/MPL/2.0/.
+
+==============================================================================
+Attribution and provenance
+==============================================================================
+
+Portions of this library are derived from libxc — in particular the functional
+formulas, the reduced-variable helper layer, and several numerical-stability
+reformulations:
+
+    libxc — https://libxc.gitlab.io/
+    Copyright (C) the libxc authors, including M. A. L. Marques, X. Andrade,
+    S. Lehtola, and M. Oliveira.
+    Licensed under the Mozilla Public License, Version 2.0.
+
+The derived portions remain under the Mozilla Public License, Version 2.0 —
+the same license under which the entire xcx crate is distributed.
+
+------------------------------------------------------------------------------
+Per-file provenance
+------------------------------------------------------------------------------
+
+Every functional source file carries one of the following tags in its header:
+
+    Provenance: ported-from-libxc
+        Derived from the corresponding libxc Maple/C source.
+
+    Provenance: clean-room
+        Implemented from the published literature, without reference to the
+        libxc source.
+
+See the individual file headers to determine the origin of any given
+functional.

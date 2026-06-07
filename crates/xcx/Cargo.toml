@@ -1,0 +1,22 @@
+[package]
+name = "xcx"
+version = "0.1.0"
+description = "Exchange–correlation functionals for density-functional theory (DFT) — pure-Rust, libxc-compatible"
+keywords = ["dft", "quantum-chemistry", "libxc", "physics", "chemistry"]
+categories = ["science", "mathematics"]
+readme = "README.md"
+documentation = "https://docs.rs/xcx"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+num-dual.workspace = true
+nalgebra.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+rand.workspace = true

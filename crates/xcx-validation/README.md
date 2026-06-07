@@ -1,0 +1,36 @@
+# xcx-validation (dev-only, not published)
+
+Cross-checks `xcx` against the reference C **libxc**. It is excluded from
+publication (`publish = false`) to keep the published crate free of any FFI or
+libxc linkage.
+
+## How it works
+
+- **Default (CI):** the test `tests/golden.rs` compares `xcx` against **committed
+  golden snapshots** in `testdata/*.json`. No libxc, libclang, or network needed,
+  so CI is deterministic.
+- **Regenerating snapshots** (only when adding/altering functionals): generate
+  fresh references from a pinned conda-forge libxc.
+
+## Regenerating the golden snapshots
+
+```bash
+conda create -n xcref -c conda-forge libxc      # pins a libxc version
+conda activate xcref
+cargo run -p xcx-validation --features libxc-ffi --bin gen_golden
+```
+
+This loads the libxc shared library at runtime via `libloading` — **no `bindgen`
+or libclang required**, and no libxc source is vendored. Point `XCX_LIBXC_DLL` at
+the shared library, or set `CONDA_PREFIX` (it then looks for
+`%CONDA_PREFIX%\Library\bin\xc.dll` on Windows, `lib/libxc.{so,dylib}` elsewhere).
+It records `xc_version()` into each snapshot and resolves ids via
+`xc_functional_get_number`, so any upstream renumbering is caught. Commit the
+regenerated `testdata/*.json`.
+
+## Tolerances
+
+`exc`/`vrho`/`vsigma` must agree with libxc within `xcx_validation::RTOL` (1e-10
+relative) with an absolute floor `ATOL` for screened/zero regions, over
+rho ∈ [1e-14, 1e3]. Sampling deliberately includes edge cases first: full spin
+polarization (z = ±1), small rho/sigma, and the `work_gga` `sigma_ab` clamp.

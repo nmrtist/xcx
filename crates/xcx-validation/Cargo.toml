@@ -1,0 +1,23 @@
+[package]
+name = "xcx-validation"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# Enable to (re)generate golden snapshots from a conda-forge libxc. Loads the
+# libxc shared library at runtime via `libloading` (no bindgen / libclang). CI
+# does NOT enable this: the golden suite runs against committed snapshots.
+libxc-ffi = ["dep:libloading"]
+
+[dependencies]
+xcx = { path = "../xcx" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libloading = { version = "0.8", optional = true }
+
+[dev-dependencies]
+approx.workspace = true
