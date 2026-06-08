@@ -32,9 +32,23 @@ pub(crate) const FPP_VWN: f64 = 1.709_920_934_161_365_3;
 /// to the PBE/B88 dimensionless gradient `s = X2S·x` (util.mpl `X2S`).
 pub(crate) const X2S: f64 = 0.128_278_243_853_042_2;
 
+/// `XT2S = 1/(2·(3π²)^(1/3))`: converts the **total** reduced gradient
+/// `x_t = |∇n|/n^(4/3)` to the SCAN-family dimensionless gradient `s = XT2S·x_t`
+/// (util.mpl `XT2S`). Distinct from [`X2S`] (which uses `6π²`, the spin-resolved
+/// Fermi factor); r2SCAN correlation's `scan_e0` / `r2scan_dy` use this total-density
+/// `s`. `s² = XT2S²·x_t²` keeps it sqrt-free from the squared total reduced gradient.
+pub(crate) const XT2S: f64 = 0.161_620_459_673_995_67;
+
 /// `4·2^(1/3)`: the denominator prefactor of the PBE correlation reduced gradient
 /// `t = x_t/(4·2^(1/3)·φ(ζ)·√rs)` (util.mpl `tt`).
 pub(crate) const FOUR_CBRT2: f64 = 5.039_684_199_579_493;
+
+/// `K_FACTOR_C = (3/10)(6π²)^(2/3)`: the Thomas–Fermi kinetic-energy prefactor.
+/// The per-spin uniform-gas kinetic energy density is `τ_unif,σ = K_FACTOR_C ·
+/// n_σ^(5/3)`, so the dimensionless meta-GGA `α_σ = (τ_σ − τ_W,σ)/τ_unif,σ`
+/// reduces to `(t_σ − x_σ²/8)/K_FACTOR_C` with `t_σ = τ_σ/n_σ^(5/3)` (util.mpl
+/// `K_FACTOR_C`, used by `tpss_alpha` and the SCAN family).
+pub(crate) const K_FACTOR_C: f64 = 4.557_799_872_345_596;
 
 #[cfg(test)]
 mod tests {
@@ -68,9 +82,16 @@ mod tests {
             1.0 / (2.0 * (6.0 * PI * PI).cbrt())
         );
         assert!(
+            close(XT2S, 1.0 / (2.0 * (3.0 * PI * PI).cbrt())),
+            "XT2S {XT2S} vs {}",
+            1.0 / (2.0 * (3.0 * PI * PI).cbrt())
+        );
+        assert!(
             close(FOUR_CBRT2, 4.0 * 2.0_f64.cbrt()),
             "FOUR_CBRT2 {FOUR_CBRT2} vs {}",
             4.0 * 2.0_f64.cbrt()
         );
+        let kfc = 0.3 * (6.0 * PI * PI).powf(2.0 / 3.0);
+        assert!(close(K_FACTOR_C, kfc), "K_FACTOR_C {K_FACTOR_C} vs {kfc}");
     }
 }

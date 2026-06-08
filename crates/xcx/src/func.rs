@@ -81,6 +81,29 @@ pub enum FunctionalId {
     GgaCPbe,
     /// Lee–Yang–Parr correlation (libxc 131).
     GgaCLyp,
+    /// Revised PBE exchange (revPBE), Zhang & Yang (libxc 102). PBE-x with κ = 1.245.
+    GgaXPbeR,
+    /// PBE-for-solids exchange (PBEsol), Perdew et al. 2008 (libxc 116). PBE-x with
+    /// μ = 10/81.
+    GgaXPbeSol,
+    /// RPBE exchange, Hammer–Hansen–Nørskov (libxc 117). PBE constants, *exponential*
+    /// enhancement.
+    GgaXRpbe,
+    /// PBE-for-solids correlation (PBEsol), Perdew et al. 2008 (libxc 133). PBE-c
+    /// with β = 0.046.
+    GgaCPbeSol,
+    /// Tao–Perdew–Staroverov–Scuseria exchange — meta-GGA (libxc 202).
+    MggaXTpss,
+    /// Tao–Perdew–Staroverov–Scuseria correlation — meta-GGA (libxc 231).
+    MggaCTpss,
+    /// Re-regularized SCAN exchange (r2SCAN) — meta-GGA (libxc 497).
+    MggaXR2scan,
+    /// Re-regularized SCAN correlation (r2SCAN) — meta-GGA (libxc 498).
+    MggaCR2scan,
+    /// Minnesota M06-L exchange — meta-GGA (libxc 203).
+    MggaXM06L,
+    /// Minnesota M06-L correlation — meta-GGA (libxc 233).
+    MggaCM06L,
     /// B3LYP, VWN_RPA convention (libxc 402). Mixes `lda_c_vwn_rpa` (8) — *not*
     /// VWN3 (that is libxc's separate `b3lyp3`/394) and *not* VWN5 (`b3lyp5`/475).
     HybGgaXcB3lyp,
@@ -104,6 +127,16 @@ impl FunctionalId {
             GgaXB88,
             GgaCPbe,
             GgaCLyp,
+            GgaXPbeR,
+            GgaXPbeSol,
+            GgaXRpbe,
+            GgaCPbeSol,
+            MggaXTpss,
+            MggaCTpss,
+            MggaXR2scan,
+            MggaCR2scan,
+            MggaXM06L,
+            MggaCM06L,
             HybGgaXcB3lyp,
             HybGgaXcPbeh,
             HybGgaXcB3lyp5,
@@ -123,6 +156,16 @@ impl FunctionalId {
             GgaXB88 => 106,
             GgaCPbe => 130,
             GgaCLyp => 131,
+            GgaXPbeR => 102,
+            GgaXPbeSol => 116,
+            GgaXRpbe => 117,
+            GgaCPbeSol => 133,
+            MggaXTpss => 202,
+            MggaCTpss => 231,
+            MggaXR2scan => 497,
+            MggaCR2scan => 498,
+            MggaXM06L => 203,
+            MggaCM06L => 233,
             HybGgaXcB3lyp => 402,
             HybGgaXcPbeh => 406,
             HybGgaXcB3lyp5 => 475,
@@ -147,6 +190,16 @@ impl FunctionalId {
             GgaXB88 => "gga_x_b88",
             GgaCPbe => "gga_c_pbe",
             GgaCLyp => "gga_c_lyp",
+            GgaXPbeR => "gga_x_pbe_r",
+            GgaXPbeSol => "gga_x_pbe_sol",
+            GgaXRpbe => "gga_x_rpbe",
+            GgaCPbeSol => "gga_c_pbe_sol",
+            MggaXTpss => "mgga_x_tpss",
+            MggaCTpss => "mgga_c_tpss",
+            MggaXR2scan => "mgga_x_r2scan",
+            MggaCR2scan => "mgga_c_r2scan",
+            MggaXM06L => "mgga_x_m06_l",
+            MggaCM06L => "mgga_c_m06_l",
             HybGgaXcB3lyp => "hyb_gga_xc_b3lyp",
             HybGgaXcPbeh => "hyb_gga_xc_pbeh",
             HybGgaXcB3lyp5 => "hyb_gga_xc_b3lyp5",
@@ -167,6 +220,16 @@ impl FunctionalId {
             "gga_x_b88" => GgaXB88,
             "gga_c_pbe" => GgaCPbe,
             "gga_c_lyp" => GgaCLyp,
+            "gga_x_pbe_r" | "revpbe" => GgaXPbeR,
+            "gga_x_pbe_sol" => GgaXPbeSol,
+            "gga_x_rpbe" => GgaXRpbe,
+            "gga_c_pbe_sol" => GgaCPbeSol,
+            "mgga_x_tpss" => MggaXTpss,
+            "mgga_c_tpss" => MggaCTpss,
+            "mgga_x_r2scan" => MggaXR2scan,
+            "mgga_c_r2scan" => MggaCR2scan,
+            "mgga_x_m06_l" | "mgga_x_m06l" => MggaXM06L,
+            "mgga_c_m06_l" | "mgga_c_m06l" => MggaCM06L,
             "hyb_gga_xc_b3lyp" => HybGgaXcB3lyp,
             "hyb_gga_xc_pbeh" | "hyb_gga_xc_pbe0" | "pbe0" => HybGgaXcPbeh,
             "hyb_gga_xc_b3lyp5" => HybGgaXcB3lyp5,
@@ -275,6 +338,15 @@ impl Functional {
         self.eval.eval(self.spin, np, input)
     }
 
+    /// Evaluate energy, first derivatives, **and** second derivatives (`fxc`)
+    /// over `np` points. Fills the same fields as [`eval`](Self::eval) plus
+    /// `v2rho2` / `v2rhosigma` / `v2sigma2` (see `docs/api-convention.md` §3 for
+    /// packing). Costs more than [`eval`](Self::eval); call it only when the
+    /// second derivatives are needed (e.g. TDDFT / response properties).
+    pub fn eval_fxc(&self, np: usize, input: &XcInput) -> Result<XcResult, XcError> {
+        self.eval.eval_fxc(self.spin, np, input)
+    }
+
     /// Build the linear combination `Σ wᵢ·fᵢ` of functionals, which must share a
     /// spin treatment. This is the only composition `xcx` performs.
     pub fn mix(parts: Vec<(f64, Functional)>) -> Result<Functional, XcError> {
@@ -337,15 +409,36 @@ impl XcEval for MixEval {
     fn eval(&self, spin: Spin, np: usize, input: &XcInput) -> Result<XcResult, XcError> {
         let mut acc = XcResult::default();
         for (w, part) in &self.parts {
-            let r = part.eval(spin, np, input)?;
-            add_scaled(&mut acc.exc, *w, &r.exc);
-            add_scaled(&mut acc.vrho, *w, &r.vrho);
-            add_scaled(&mut acc.vsigma, *w, &r.vsigma);
-            add_scaled(&mut acc.vtau, *w, &r.vtau);
-            add_scaled(&mut acc.vlapl, *w, &r.vlapl);
+            accumulate(&mut acc, *w, &part.eval(spin, np, input)?);
         }
         Ok(acc)
     }
+
+    fn eval_fxc(&self, spin: Spin, np: usize, input: &XcInput) -> Result<XcResult, XcError> {
+        let mut acc = XcResult::default();
+        for (w, part) in &self.parts {
+            accumulate(&mut acc, *w, &part.eval_fxc(spin, np, input)?);
+        }
+        Ok(acc)
+    }
+}
+
+/// Accumulate `acc += w·r` over every output field. fxc fields are accumulated
+/// the same linear way as the first derivatives, so a hybrid inherits fxc from
+/// its semilocal parts for free (the fields are empty when fxc was not
+/// requested, so `eval` and `eval_fxc` share this one helper).
+fn accumulate(acc: &mut XcResult, w: f64, r: &XcResult) {
+    add_scaled(&mut acc.exc, w, &r.exc);
+    add_scaled(&mut acc.vrho, w, &r.vrho);
+    add_scaled(&mut acc.vsigma, w, &r.vsigma);
+    add_scaled(&mut acc.vtau, w, &r.vtau);
+    add_scaled(&mut acc.vlapl, w, &r.vlapl);
+    add_scaled(&mut acc.v2rho2, w, &r.v2rho2);
+    add_scaled(&mut acc.v2rhosigma, w, &r.v2rhosigma);
+    add_scaled(&mut acc.v2sigma2, w, &r.v2sigma2);
+    add_scaled(&mut acc.v2rhotau, w, &r.v2rhotau);
+    add_scaled(&mut acc.v2sigmatau, w, &r.v2sigmatau);
+    add_scaled(&mut acc.v2tau2, w, &r.v2tau2);
 }
 
 fn add_scaled(dst: &mut Vec<f64>, w: f64, src: &[f64]) {

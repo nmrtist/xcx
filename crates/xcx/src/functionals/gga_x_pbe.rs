@@ -24,23 +24,52 @@ use crate::reduced::consts::X2S;
 // PBE exchange parameters. `kappa` is the asymptotic enhancement bound; `mu` is
 // `MU_PBE = 0.06672455060314922·π²/3`, computed from π exactly as libxc does (its
 // `pbe_values` is `{0.8040, MU_PBE}` with `MU_PBE = 0.066…*M_PI*M_PI/3`).
-const KAPPA: f64 = 0.8040;
-const MU: f64 = 0.066_724_550_603_149_22 * PI * PI / 3.0;
+// `pub(crate)` because the PBE-x family variants (revPBE swaps κ; PBEsol-x swaps
+// μ) and M06-L reuse these exact literals when calling the shared
+// [`pbe_enhancement`] — they parameterize, never fork (CLAUDE.md §2/§3).
+pub(crate) const KAPPA: f64 = 0.8040;
+pub(crate) const MU: f64 = 0.066_724_550_603_149_22 * PI * PI / 3.0;
+/// `μ·X2S²`: the coefficient of the **squared** reduced gradient `x²` in `κ + μs²`
+/// (since `s = X2S·x`, `μs² = μ·X2S²·x²`). Folding `X2S²` into the constant lets
+/// the enhancement consume `x²` directly (sqrt-free), with `μ`/`X2S` kept exact.
+pub(crate) const MU_X2S2: f64 = MU * X2S * X2S;
 
-/// PBE exchange enhancement `F_x(s)`, `s = X2S·x`. Mathematically libxc's
-/// `pbe_f0 = 1 + κμs²/(κ + μs²)`, but written here in the algebraically
-/// identical `(1 + κ) − κ²/(κ + μs²)` form. The reason is **forward-AD**: the
-/// maple form's quotient-rule derivative produces `2κμ²s³ − 2κμ²s³`, which
-/// cancels catastrophically at large `s` (≈1e-9 error by `s ~ 10³`, where it
-/// would miss the golden tol). This form's AD derivative is `κ²/(κ+μs²)²·2μs`,
-/// computed with no large-term subtraction — bit-for-bit close to libxc's
-/// pre-simplified analytic `dF` (`2κ²μs/(κ+μs²)²`). The two forms agree on the
-/// energy to ~1e-16 (the small-`s` `1 − close-to-1` only perturbs the tiny GGA
-/// correction, never the O(1) energy), so `F(0) = 1` still holds.
-fn pbe_enhancement<N: DualNum<f64> + Copy>(xs: N) -> N {
-    let s = N::from(X2S) * xs;
-    let denom = N::from(KAPPA) + N::from(MU) * (s * s); // κ + μs²
-    N::from(1.0 + KAPPA) - N::from(KAPPA * KAPPA) / denom
+/// PBE exchange enhancement `F_x` as a function of the **squared** reduced
+/// gradient `t = x²` (`s² = X2S²·x² = X2S²·t`). Mathematically libxc's
+/// `pbe_f0 = 1 + κμs²/(κ + μs²)`, written here in the algebraically identical
+/// `(1 + κ) − κ²/(κ + μs²)` form. Two reasons, both **forward-AD**:
+/// 1. *Squared input* (`t`, not the magnitude `x = √σ/n^(4/3)`): the maple feeds
+///    `x` and squares it, but `√σ`'s second derivative diverges as σ → 0, so the
+///    AD `v2sigma2` loses accuracy at small σ (divergence #4). `F` needs only
+///    `x²`, so we pass `t` and never form `√σ` here — `v2sigma2` stays accurate.
+/// 2. *Rational form* `(1+κ) − κ²/(κ+μs²)`: the maple's `1 + κμs²/(κ+μs²)`
+///    quotient-rule derivative produces `2κμ²s³ − 2κμ²s³`, cancelling
+///    catastrophically at large `s` (≈1e-9 error by `s ~ 10³`); this form's AD
+///    derivative `κ²/(κ+μs²)²·2μs` has no large-term subtraction — bit-for-bit
+///    close to libxc's pre-simplified analytic `dF`.
+///
+/// Both rewrites are algebraic identities for the energy and `vxc` (the energy
+/// matches the maple to ~1e-16); only `fxc` changes, becoming clean. `F(0) = 1`
+/// holds exactly (at `t = 0`, `denom = κ`, `F = (1+κ) − κ = 1`).
+///
+/// `pub(crate)` and **parameterized over `kappa`/`mu_x2s2`** because the whole
+/// rational-PBE-x family shares this one form, differing only in those two
+/// constants — and M06-L reuses it verbatim:
+/// - PBE-x: `kappa = KAPPA` (0.804), `mu_x2s2 = MU_X2S2` (μ = MU_PBE).
+/// - revPBE (`gga_x_pbe_r`): only `kappa` swaps to 1.245; μ unchanged.
+/// - PBEsol-x (`gga_x_pbe_sol`): only μ swaps to `MU_GE = 10/81` (`mu_x2s2`); κ
+///   unchanged.
+/// - M06-L's `pbe_f(x)` factor (`maple/mgga_exc/mgga_x_m06l.mpl`, via `$define
+///   gga_x_pbe_params`) is precisely PBE-x's `pbe_f0` with the same κ/μ.
+///
+/// All call this single source rather than forking a copy (CLAUDE.md §2/§3 reuse
+/// rule; recovery tests in `gga_x_pbe_r` / `gga_x_pbe_sol` / `mgga_x_m06_l` pin the
+/// PBE limiting case `pbe_enhancement(t, KAPPA, MU_X2S2)` to PBE-x's `pbe_f0`).
+/// `mu_x2s2` is the coefficient of the **squared** reduced gradient `x²` in
+/// `κ + μs²` (`s = X2S·x`, so `μs² = (μ·X2S²)·x²`).
+pub(crate) fn pbe_enhancement<N: DualNum<f64> + Copy>(t: N, kappa: f64, mu_x2s2: f64) -> N {
+    let denom = N::from(kappa) + N::from(mu_x2s2) * t; // κ + μs² = κ + μ·X2S²·x²
+    N::from(1.0 + kappa) - N::from(kappa * kappa) / denom
 }
 
 pub(crate) struct GgaXPbe {
@@ -80,12 +109,9 @@ impl GgaEnergy for GgaXPbe {
         // GGA exchange = per-channel LDA exchange × PBE enhancement, screened on
         // the floored spin density (shared `gga_exchange` skeleton; the
         // enhancement is this functional's only contribution).
-        gga_exchange(
-            &v,
-            self.info.dens_threshold,
-            self.zeta_threshold,
-            pbe_enhancement,
-        )
+        gga_exchange(&v, self.info.dens_threshold, self.zeta_threshold, |t| {
+            pbe_enhancement(t, KAPPA, MU_X2S2)
+        })
     }
 }
 

@@ -10,8 +10,11 @@
 //! Like PBE exchange, B88 is the LDA exchange of each spin channel times an
 //! enhancement factor `F_x(x_σ)` — so it reuses the shared `gga_exchange`
 //! skeleton (screen + `lda_x_spin` + per-channel sum). Only the enhancement
-//! differs: B88's `F_x` depends on the reduced gradient `x` directly (no `X2S`
-//! prefactor, unlike PBE's `s = X2S·x`).
+//! differs: B88's `F_x` uses the reduced gradient `x` directly (no `X2S`
+//! prefactor, unlike PBE's `s = X2S·x`). It consumes the **squared** gradient
+//! `t = x²` (sqrt-free) and routes the `x·asinh(x)` term through [`b88_g`], a
+//! power series in `t` near 0, so the second derivative `v2sigma2` stays accurate
+//! as σ → 0 (divergence #4; see [`crate::reduced::vars::reduced_grad_sq`]).
 
 use num_dual::DualNum;
 
@@ -26,22 +29,73 @@ use crate::reduced::consts::X_FACTOR_C;
 const BETA: f64 = 0.0042;
 const GAMMA: f64 = 6.0;
 
-/// B88 exchange enhancement `F_x(x) = 1 + (β/X_FACTOR_C)·x² / (1 + γβ·x·asinh(x))`,
-/// with `x` the per-channel reduced gradient (libxc's `b88_f`; the maple feeds
-/// `xs0`/`xs1` straight in, no `X2S`).
+/// Switch point (in `t = x²`) between the power series for `g(t) = x·asinh(x)`
+/// and the direct `√t·asinh(√t)`. Below it the direct form's `√t` would carry a
+/// `~t^(-3/2)` second derivative that destroys fxc accuracy; above it `√t` is
+/// bounded away from 0 and harmless. At `t = 0.1` the two forms agree to ~4e-19.
+const T_SWITCH: f64 = 0.1;
+
+/// Taylor coefficients of `g(t) = √t·asinh(√t) = Σ_{k≥0} G[k]·t^(k+1)` about
+/// `t = 0` (so `g = t − t²/6 + 3t³/40 − 5t⁴/112 + …`). `G[k] = (−1)^k (2k)! /
+/// (4^k (k!)² (2k+1))` (the `asinh` series, shifted one power). 16 terms make the
+/// series and the direct form agree to ~4e-19 (value) and ~4e-15 (second
+/// derivative) at `T_SWITCH = 0.1` — far under the 1e-10 fxc tolerance. Verified
+/// against the recurrence `G[k] = G[k−1]·(−(2k−1)²/(2k(2k+1)))` in the unit test.
+const G_COEFFS: [f64; 16] = [
+    1.0,
+    -0.166_666_666_666_666_66,
+    0.075,
+    -0.044_642_857_142_857_144,
+    0.030_381_944_444_444_444,
+    -0.022_372_159_090_909_092,
+    0.017_352_764_423_076_924,
+    -0.013_964_843_75,
+    0.011_551_800_896_139_705,
+    -0.009_761_609_529_194_078,
+    0.008_390_335_809_616_815,
+    -0.007_312_525_873_598_845_4,
+    0.006_447_210_311_889_649,
+    -0.005_740_037_670_841_924,
+    0.005_153_309_682_319_905,
+    -0.004_660_143_486_915_096,
+];
+
+/// `g(t) = √t·asinh(√t) = x·asinh(x)` with `t = x²`. **Analytic in `t`** (its
+/// Taylor series has only integer powers of `t`), which is why B88's enhancement
+/// is analytic in `t` and its `v2sigma2` is finite at σ = 0. Below `T_SWITCH`
+/// evaluate the series (sqrt-free → forward-AD's second derivative stays accurate
+/// at small σ, divergence #4); at/above it use the direct form, where `√t` is far
+/// from 0 and its derivatives are harmless. `g(0) = 0` exactly (the series has no
+/// constant term), so `F_x(σ = 0) = 1` (the LDA limit) is preserved exactly.
+fn b88_g<N: DualNum<f64> + Copy>(t: N) -> N {
+    if t.re() < T_SWITCH {
+        // Horner on the inner polynomial Σ G[k]·t^k, then ×t to get Σ G[k]·t^(k+1).
+        let mut p = N::from(G_COEFFS[G_COEFFS.len() - 1]);
+        for &c in G_COEFFS[..G_COEFFS.len() - 1].iter().rev() {
+            p = p * t + N::from(c);
+        }
+        p * t
+    } else {
+        let x = t.sqrt();
+        x * x.asinh()
+    }
+}
+
+/// B88 exchange enhancement `F_x` as a function of the **squared** reduced
+/// gradient `t = x²`: `F = 1 + (β/X_FACTOR_C)·t / (1 + γβ·g(t))`, with
+/// `g(t) = √t·asinh(√t) = x·asinh(x)` (libxc's `b88_f`; the maple feeds the
+/// magnitude `x = √σ/n^(4/3)` straight in, no `X2S`).
 ///
 /// Written as `1 + m1` directly (matching libxc's `b88_f := 1 + b88_f_m1`): we
 /// need `F`, not `F − 1`, so the energy never forms a `(1 + tiny) − 1`
-/// cancellation. Under forward-AD this is clean as-is — unlike PBE's rational
-/// factor there is **no** large-term cancellation in the derivative (at large
-/// `x` the numerator of `dF` scales as `x²·(asinh x − 1)`, a difference of
-/// *differently*-scaled terms, not equal ones). `asinh`'s AD derivative is
-/// libxc's exact `diff/xc_asinh = 1/√(1+x²)`, and `x > 0` always (the harness
-/// floors each spin σ), so `√σ` inside `x` and `asinh(x)` stay finite.
-fn b88_enhancement<N: DualNum<f64> + Copy>(xs: N) -> N {
-    let x2 = xs * xs;
-    let denom = N::from(1.0) + N::from(GAMMA * BETA) * xs * xs.asinh(); // 1 + γβ·x·asinh(x)
-    N::from(1.0) + N::from(BETA / X_FACTOR_C) * x2 / denom
+/// cancellation. Passing `t` (not the magnitude `x`) and routing `x·asinh(x)`
+/// through [`b88_g`] keeps the AD `v2sigma2` accurate as σ → 0: the maple forms
+/// `x = √σ/n^(4/3)` whose second derivative diverges `~ σ^(-3/2)`, destroying the
+/// finite-limit cancellation in f64 (divergence #4). This is an algebraic
+/// identity for the energy and `vxc`; only `fxc` changes, becoming clean.
+fn b88_enhancement<N: DualNum<f64> + Copy>(t: N) -> N {
+    let denom = N::from(1.0) + N::from(GAMMA * BETA) * b88_g(t); // 1 + γβ·g(t)
+    N::from(1.0) + N::from(BETA / X_FACTOR_C) * t / denom
 }
 
 pub(crate) struct GgaXB88 {
@@ -92,7 +146,43 @@ impl GgaEnergy for GgaXB88 {
 
 #[cfg(test)]
 mod tests {
+    use super::{b88_g, G_COEFFS, T_SWITCH};
     use crate::{Functional, FunctionalId, Spin, XcInput};
+
+    /// The hardcoded `g(t)` Taylor coefficients must equal the closed-form
+    /// recurrence `G[k] = G[k−1]·(−(2k−1)²/(2k(2k+1)))`, `G[0] = 1` — so the
+    /// literals are provably the `√t·asinh(√t)` series (cf. the consts.rs pattern).
+    #[test]
+    fn g_coeffs_match_recurrence() {
+        assert_eq!(G_COEFFS[0], 1.0);
+        let mut prev = 1.0_f64;
+        for (k, &g) in G_COEFFS.iter().enumerate().skip(1) {
+            let kk = k as f64;
+            prev *= -((2.0 * kk - 1.0).powi(2)) / (2.0 * kk * (2.0 * kk + 1.0));
+            assert!(
+                (g - prev).abs() <= 1e-15 * prev.abs(),
+                "G[{k}] = {g} vs recurrence {prev}"
+            );
+        }
+    }
+
+    /// The series branch (`t < T_SWITCH`) and the direct `√t·asinh(√t)` must
+    /// agree across the switch, and `g(0) = 0` exactly (so `F_x(σ=0) = 1`).
+    #[test]
+    fn b88_g_series_matches_direct() {
+        assert_eq!(b88_g(0.0_f64), 0.0, "g(0) must be exactly 0");
+        for &t in &[1e-8_f64, 1e-3, 0.05, 0.09, T_SWITCH * (1.0 - 1e-12)] {
+            let direct = t.sqrt() * t.sqrt().asinh();
+            assert!(
+                (b88_g(t) - direct).abs() <= 1e-13 * direct.abs(),
+                "b88_g({t}) series {} vs direct {direct}",
+                b88_g(t)
+            );
+        }
+        // and the direct branch agrees with itself just above the switch
+        let t = T_SWITCH * (1.0 + 1e-12);
+        assert!((b88_g(t) - t.sqrt() * t.sqrt().asinh()).abs() <= 1e-15);
+    }
 
     fn b88(spin: Spin) -> Functional {
         Functional::new(FunctionalId::GgaXB88, spin).unwrap()

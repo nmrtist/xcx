@@ -60,13 +60,36 @@ derivatives of the **energy density** e = n·ε_xc, where n is the total density
 | `vsigma` | `np`                        | `3*np`  `[∂/∂σ_aa, ∂/∂σ_ab, ∂/∂σ_bb]` |
 | `vtau`   | `np`                        | `2*np` |
 | `vlapl`  | `np`                        | `2*np` |
+| `v2rho2`     | `np`                    | `3*np`  `[aa, ab, bb]` |
+| `v2rhosigma` | `np`                    | `6*np`  `[a·aa, a·ab, a·bb, b·aa, b·ab, b·bb]` |
+| `v2sigma2`   | `np`                    | `6*np`  `[aa·aa, aa·ab, aa·bb, ab·ab, ab·bb, bb·bb]` |
+| `v2rhotau`   | `np`                    | `4*np`  `[a·τa, a·τb, b·τa, b·τb]` |
+| `v2sigmatau` | `np`                    | `6*np`  `[aa·τa, aa·τb, ab·τa, ab·τb, bb·τa, bb·τb]` |
+| `v2tau2`     | `np`                    | `3*np`  `[τa·τa, τa·τb, τb·τb]` |
 
-This matches libxc's layout exactly, easing interop and verification.
+This matches libxc's layout exactly, easing interop and verification. The second
+derivatives (`fxc`) are produced only by `eval_fxc` (§4); they are empty after a
+plain `eval`. Their polarized packing follows libxc's `xc.h`: `v2rho2` is the
+symmetric ρ–ρ block `[aa, ab, bb]`; `v2rhosigma` is the full ρ–σ block, ρ-spin
+major (`a` then `b`) × σ minor (`aa, ab, bb`); `v2sigma2` is the symmetric σ–σ
+upper triangle. `v2rhosigma`/`v2sigma2` are empty for LDA. The meta-GGA τ blocks
+follow the same rule: `v2rhotau` is the full ρ–τ block (ρ-spin major × τ-spin
+minor), `v2sigmatau` the full σ–τ block (σ major × τ-spin minor), and `v2tau2`
+the symmetric τ–τ upper triangle; all three are empty unless the functional is
+meta-GGA. The Laplacian second-derivative blocks (`v2rholapl`, `v2sigmalapl`,
+`v2lapl2`, `v2lapltau`) are not yet produced — no current functional needs the
+Laplacian (`needs_lapl = false`) — and are reserved for a future additive
+release. (FFI-verified against libxc 6.1.0 with an asymmetric polarized point, so
+the ρ/σ/τ-spin ordering of each block is pinned, not assumed.)
 
 ## 4. Public types (stable surface)
 
-Kept intentionally small. All public enums are `#[non_exhaustive]` so new
-families/kinds/IDs can be added without a major bump.
+Kept intentionally small. All public enums **and** the `XcInput` / `XcResult`
+structs are `#[non_exhaustive]`, so new families/kinds/IDs, new optional inputs,
+and new derivative orders can be added without a major bump. Construct `XcInput`
+via its constructors/builders (`lda`, `gga`, `with_lapl`, `with_tau`) and obtain
+`XcResult` from `eval` (or `XcResult::default()`); struct literals are not part
+of the contract.
 
 ```rust
 pub enum Spin { Unpolarized, Polarized }          // #[non_exhaustive]
@@ -103,19 +126,31 @@ pub struct HybridInfo {
 pub struct CamParams  { pub omega: f64, pub alpha: f64, pub beta: f64 }
 pub struct Vv10Params { pub b: f64, pub c: f64 }
 
-pub struct XcInput<'a> {
+pub struct XcInput<'a> {            // #[non_exhaustive]
     pub rho:   &'a [f64],
     pub sigma: Option<&'a [f64]>,
     pub lapl:  Option<&'a [f64]>,
     pub tau:   Option<&'a [f64]>,
 }
+impl<'a> XcInput<'a> {
+    pub fn lda(rho: &'a [f64]) -> Self;                 // density only
+    pub fn gga(rho: &'a [f64], sigma: &'a [f64]) -> Self; // + gradient
+    pub fn with_lapl(self, lapl: &'a [f64]) -> Self;   // meta-GGA builder
+    pub fn with_tau(self, tau: &'a [f64]) -> Self;     // meta-GGA builder
+}
 
-pub struct XcResult {
+pub struct XcResult {               // #[non_exhaustive]; build via XcResult::default()
     pub exc:    Vec<f64>,            // len np
     pub vrho:   Vec<f64>,            // len np*ns
     pub vsigma: Vec<f64>,            // len np*nsigma (empty for LDA)
     pub vtau:   Vec<f64>,            // empty unless meta-GGA
     pub vlapl:  Vec<f64>,            // empty unless meta-GGA needs lapl
+    pub v2rho2:     Vec<f64>,        // fxc; empty unless eval_fxc was called
+    pub v2rhosigma: Vec<f64>,        // fxc; empty for LDA / unless eval_fxc
+    pub v2sigma2:   Vec<f64>,        // fxc; empty for LDA / unless eval_fxc
+    pub v2rhotau:   Vec<f64>,        // fxc; meta-GGA only / unless eval_fxc
+    pub v2sigmatau: Vec<f64>,        // fxc; meta-GGA only / unless eval_fxc
+    pub v2tau2:     Vec<f64>,        // fxc; meta-GGA only / unless eval_fxc
 }
 
 pub struct Functional { /* opaque: boxed evaluator + spin + info */ }
@@ -127,6 +162,9 @@ impl Functional {
     pub fn exx_fraction(&self) -> f64;                 // 0.0 if not hybrid
     /// Allocating evaluation: energy + all available first derivatives.
     pub fn eval(&self, np: usize, input: &XcInput) -> Result<XcResult, XcError>;
+    /// Allocating evaluation through second order: energy + first derivatives +
+    /// `fxc` (`v2rho2`/`v2rhosigma`/`v2sigma2`). Costlier than `eval`.
+    pub fn eval_fxc(&self, np: usize, input: &XcInput) -> Result<XcResult, XcError>;
     /// Build a linear combination Σ wᵢ·fᵢ of same-spin functionals.
     pub fn mix(parts: Vec<(f64, Functional)>) -> Result<Functional, XcError>;
 }
@@ -151,7 +189,11 @@ pub enum XcError {                  // #[non_exhaustive]
   *Domain caveat:* for non-physical, astronomically large gradients (reduced
   gradient `s ≫ 10³` — far beyond any real density), the gradient polynomials can
   exceed f64 range and overflow. This is outside the functional's domain and
-  outside the fuzz-tested range (see §8, divergence C).
+  outside the fuzz-tested range (see §8, divergence C). The second derivatives
+  (`fxc`) overflow at a *lower* reduced gradient than the first derivatives, so
+  the `fxc` finiteness guarantee (and the fuzz gate that enforces it) is bounded
+  to the physical reduced-gradient domain; inside that domain every `fxc`
+  component is finite.
 
 ## 5. Metadata semantics
 
@@ -175,18 +217,21 @@ hybrids' semilocal parts are expressed this way internally where convenient.
 
 ## 7. Stability guarantees
 
-- The items in §4 are semver-stable; enums are `#[non_exhaustive]`.
+- The items in §4 are semver-stable; the enums **and** the `XcInput` / `XcResult`
+  structs are `#[non_exhaustive]`.
 - Numerical outputs are validated to ≤ 1e-10 relative vs. pinned libxc over
   rho ∈ [1e-14, 1e3] (screened/zero regions compared by absolute value).
-- Adding functionals, derivative orders (`fxc`+), or families is additive and
-  non-breaking.
+- Because both structs are `#[non_exhaustive]`, adding functionals, optional
+  inputs, derivative orders (`fxc`+), or families is additive and non-breaking.
+  (Before 0.2 the structs were exhaustive, so adding a field *was* breaking; the
+  0.2 `#[non_exhaustive]` change made this guarantee actually hold.)
 
 ## 8. Faithfulness & known divergences from libxc
 
 xcx's policy is to match pinned libxc (currently **6.1.0**) to ≤ 1e-10, *even
 where libxc itself is the less accurate of the two*, so the two are
-interchangeable. Three intentional divergences are documented for completeness;
-**none affects a physically-meaningful calculation**:
+interchangeable. The intentional divergences below are documented for
+completeness; **none affects a physically-meaningful calculation**:
 
 - **(A) Reproduce-libxc.** Near full spin polarization (`|ζ| → 1`), libxc computes
   the correlation spin-interpolation `f(ζ)` in a form that loses a few digits to
@@ -210,6 +255,62 @@ interchangeable. Three intentional divergences are documented for completeness;
   beyond it) both libraries are finite *and* agree to ≤ 1e-10; out there neither is
   meaningful. The first non-finite output is always a derivative, never the energy.
 
-In all three cases the energy `zk` matches throughout the physical domain; the
-differences live only in derivatives at non-physical inputs or below the 1e-10
+- **(B, second-order) `gga_x_b88` `v2sigma2` at *exactly* `sigma = 0`.** B88's
+  enhancement is analytic in `sigma` at 0 (`x·asinh x = t − t²/6 + …`, a
+  convergent series in `t = (√sigma/n^{4/3})²`), so its second derivative there
+  equals the `sigma → 0` limit. xcx carries every reduced gradient *squared and
+  sqrt-free*, so it computes that limit; libxc's *analytic* `v2sigma2` instead
+  truncates to (5/8)× the limit at/below its `sigma`-floor and at exact 0 — a
+  libxc artifact (libxc emits the correct limit for all `sigma ∈ [1e-8, 1e-20]`).
+  xcx is the accurate side, confirmed by an independent finite difference of
+  libxc's *own* first derivative and by the closed form `F''(0)`. The `fxc` golden
+  set therefore pins the small-`sigma` band (down to `1e-8`, both spins, all GGA/
+  hybrid cases ≤ 1e-10) but omits *exact* `sigma = 0` for B88 and the
+  B88-containing hybrids (`b3lyp`/`b3lyp5`); PBE-x, the correlation functionals,
+  and PBE0 are accurate at `sigma = 0` and *are* pinned there. (This supersedes an
+  earlier, inverted claim — that xcx's forward-AD was the less-accurate side
+  across a small-`sigma` *band*; the sqrt-free reformulation eliminated that band,
+  leaving only this single, opposite-signed zero-gradient point.)
+
+- **(D) Meta-GGA low-density first-derivative divergence (`mgga_c_r2scan`,
+  `mgga_c_m06_l`).** At extreme low density (n ≲ 1e-8, far below any physical
+  density), r2SCAN correlation's gradient derivatives (`vsigma`/`vtau`) diverge from
+  libxc by more than 1e-10 through an analytic-vs-AD cancellation at very large
+  `r_s`, while the energy still matches. `mgga_c_m06_l` shows the same class at
+  exact **full spin polarization**: it uses the raw per-spin reduced kinetic-energy
+  density `τ_σ/n_σ^(5/3)` (not the `(n_σ/n)^(5/3)`-weighted total of TPSS/r2SCAN), so
+  as a minority spin density `n_b → 0` its minority-channel `vrho`/`vsigma`/`vtau`
+  blow up `∝ n_b^(−8/3)` and the floored-edge value diverges from libxc (~1e-6…1e-5
+  relative), while the energy and majority channel still match. Both are the same
+  class as the LDA/GGA correlation full-polarization cancellation (A): xcx does not
+  pin to libxc in that regime (r2SCAN-c validation stops at n = 1e-8; M06-L-c drops
+  the *exact* full-polarization edge but pins the physical near-edge `(1.0, 1e-4)`,
+  both ≤ 1e-10), and the finiteness contract still holds down to n = 1e-14 / exact
+  full polarization. TPSS, r2SCAN exchange, and M06-L exchange are unaffected.
+
+- **(E) Meta-GGA out-of-domain robustness (the σ-clamp corner).** Mirroring (C):
+  for non-physical inputs (very large `sigma` over a tiny density, reduced gradient
+  `s ≫ 10³`), the σ_ab-clamp corner drives the *total* contracted gradient to f64
+  cancellation noise. There libxc's meta-GGA energy can be non-finite while xcx's
+  stays finite (xcx floors the mathematically-nonnegative total gradient at 0),
+  the opposite-direction robustness asymmetry to (C). No physical calculation is
+  affected; inside the domain the two agree to ≤ 1e-10.
+
+- **Fermi-hole-curvature (FHC) clamp is build-conditional in libxc.** libxc's
+  meta-GGA harness applies the constraint `sigma_σσ ← min(sigma_σσ, 8·n_σ·τ_σ)`
+  **only when libxc is compiled with `XC_ENFORCE_FERMI_HOLE_CURVATURE`** (exposed
+  as the functional flag `XC_FLAGS_ENFORCE_FHC`). The pinned reference build
+  (conda-forge libxc 6.1.0) **has it enabled**, and xcx reproduces that clamp so
+  the two match to ≤ 1e-10. Faithfulness to libxc here is therefore relative to a
+  *clamp-on* build: a host whose own libxc was built **without** that flag would
+  apply no clamp, and could see a tiny meta-GGA mismatch against xcx in the narrow
+  region where the constraint is active (`x_σ²/(8 t_σ) > 1`, i.e. `sigma_σσ >
+  8·n_σ·τ_σ`). This affects only that clamp region; everywhere else the clamp is a
+  no-op and the build flag is immaterial.
+
+In all cases the energy `zk` matches throughout the physical domain; the
+differences live only in derivatives at non-physical inputs, the second
+derivative's exact zero-gradient point (where it is libxc, not xcx, that is the
+less accurate), the extreme-low-density first derivatives (D), the out-of-domain
+σ-clamp corner (E), the build-conditional FHC clamp region, or below the 1e-10
 tolerance.

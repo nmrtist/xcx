@@ -16,11 +16,16 @@ use crate::io::{XcInput, XcResult};
 
 pub(crate) mod gga;
 pub(crate) mod lda;
+pub(crate) mod mgga;
 
 /// Object-safe evaluator: the runtime-dispatched form of a functional.
 pub(crate) trait XcEval: Send + Sync {
     fn info(&self) -> &FunctionalInfo;
+    /// Energy + all available first derivatives.
     fn eval(&self, spin: Spin, np: usize, input: &XcInput) -> Result<XcResult, XcError>;
+    /// Energy + first derivatives + second derivatives (`fxc`). Fills the same
+    /// fields as [`eval`](XcEval::eval) plus `v2rho2`/`v2rhosigma`/`v2sigma2`.
+    fn eval_fxc(&self, spin: Spin, np: usize, input: &XcInput) -> Result<XcResult, XcError>;
 }
 
 /// Validate that `slice.len() == expected`.

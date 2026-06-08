@@ -7,9 +7,22 @@
 //! Contract under test (docs/api-convention.md §4): **every output component is
 //! finite for every finite input** — not just `exc`, but each `vrho` channel and
 //! all three `vsigma` (aa/ab/bb), and `vtau`/`vlapl` (empty until meta-GGA, but
-//! checked anyway). This is orthogonal to the golden suite (which checks "numbers
-//! match libxc"); here we only check "no NaN/Inf/panic," over all 12 functionals
-//! × both spins.
+//! checked anyway). The same finiteness check is extended to the second
+//! derivatives (`fxc`: `v2rho2`/`v2rhosigma`/`v2sigma2`) — the NaN-derivative
+//! lesson applies doubly to second derivatives. This is orthogonal to the golden
+//! suite (which checks "numbers match libxc"); here we only check "no
+//! NaN/Inf/panic," over every registered functional (`FunctionalId::ALL`) × both
+//! spins.
+//!
+//! `fxc` finiteness is asserted only **inside the physical reduced-gradient
+//! domain** (docs/api-convention.md §4 domain caveat / §8 divergence C): second
+//! derivatives overflow f64 at a lower gradient than the first derivatives, and
+//! out there neither xcx nor libxc is meaningful, so we do not chase f64-range
+//! behavior. The σ range stays at the documented cap (1e12); the per-point domain
+//! predicate ([`fxc_in_domain`]) additionally bounds the reduced gradient. The
+//! census reports how many `fxc` checks ran vs. were skipped, per region, so the
+//! coverage of the boundary regions (full polarization, σ_tot = 0, …) is
+//! auditable.
 //!
 //! This file is **libxc-free** — it uses only the public `xcx` surface (no
 //! `xcx-validation`, no FFI) — so it ships with the published crate.
@@ -41,6 +54,18 @@ const SEED: u64 = 0xF02D_C0FF_EE5E_ED42;
 const RANDOM_UNPOL: usize = 2000;
 const RANDOM_POL: usize = 3000;
 
+/// Documented physical σ cap for the `fxc` finiteness check (matches the fuzz's
+/// `sigma_huge_abs` ceiling and docs/api-convention.md §4). Above this the input
+/// is non-physical and `fxc` may overflow (divergence C) — not checked.
+const FXC_SIGMA_CAP: f64 = 1e12;
+
+/// Reduced-gradient ceiling for the `fxc` finiteness check. Real densities have
+/// `s ≲ 5`; this is an order of magnitude beyond, so the whole physical domain
+/// (and the boundary regions that have produced NaNs before) is covered, while
+/// the pathological large-gradient corner where second derivatives overflow f64
+/// (divergence C, worse for `fxc` than vxc) is excluded by design.
+const FXC_REDUCED_GRAD_MAX: f64 = 50.0;
+
 // ---------------------------------------------------------------------------
 // Coverage census + the per-point finiteness check.
 // ---------------------------------------------------------------------------
@@ -51,6 +76,15 @@ struct Census {
     evals: u64,
     components: u64,
     by_region: BTreeMap<&'static str, u64>,
+    /// `fxc` evaluations actually checked (point inside the physical domain).
+    fxc_evals: u64,
+    /// `fxc` finiteness checks performed.
+    fxc_components: u64,
+    /// Points skipped for `fxc` (outside the physical reduced-gradient domain).
+    fxc_skipped: u64,
+    /// Per-region count of `fxc` evaluations checked — proves the boundary
+    /// regions (full polarization, σ_tot = 0, …) got second-derivative coverage.
+    fxc_by_region: BTreeMap<&'static str, u64>,
 }
 
 impl Census {
@@ -59,12 +93,17 @@ impl Census {
             evals: 0,
             components: 0,
             by_region: BTreeMap::new(),
+            fxc_evals: 0,
+            fxc_components: 0,
+            fxc_skipped: 0,
+            fxc_by_region: BTreeMap::new(),
         }
     }
 
     /// Evaluate one point (`np = 1`) and assert every output component finite.
     /// `regions` are the named pathological regions this input belongs to (e.g.
     /// `["full_pol_exact", "sigma_tot_zero_exact"]`); each is credited.
+    #[allow(clippy::too_many_arguments)]
     fn check(
         &mut self,
         f: &Functional,
@@ -72,19 +111,22 @@ impl Census {
         spin: Spin,
         rho: &[f64],
         sigma: Option<&[f64]>,
+        tau: Option<&[f64]>,
         regions: &[&'static str],
     ) {
-        let input = match sigma {
-            Some(s) => XcInput::gga(rho, s),
-            None => XcInput::lda(rho),
+        let input = match (sigma, tau) {
+            (Some(s), Some(t)) => XcInput::gga(rho, s).with_tau(t),
+            (Some(s), None) => XcInput::gga(rho, s),
+            (None, _) => XcInput::lda(rho),
         };
         let r = f.eval(1, &input).unwrap_or_else(|e| {
             panic!(
-                "{} (id {}) spin {spin:?}: eval errored on finite input {e:?}: rho=[{}] sigma={}",
+                "{} (id {}) spin {spin:?}: eval errored on finite input {e:?}: rho=[{}] sigma={} tau={}",
                 f.info().name,
                 id.as_u32(),
                 fmt_slice(rho),
                 sigma.map_or("None".to_string(), |s| format!("[{}]", fmt_slice(s))),
+                tau.map_or("None".to_string(), |t| format!("[{}]", fmt_slice(t))),
             )
         });
 
@@ -110,10 +152,99 @@ impl Census {
             }
         }
 
+        // Second derivatives (fxc), inside the physical reduced-gradient domain.
+        if fxc_in_domain(rho, sigma, f.info().dens_threshold) {
+            let r = f.eval_fxc(1, &input).unwrap_or_else(|e| {
+                panic!(
+                    "{} (id {}) spin {spin:?}: eval_fxc errored on finite input {e:?}: \
+                     rho=[{}] sigma={} tau={}",
+                    f.info().name,
+                    id.as_u32(),
+                    fmt_slice(rho),
+                    sigma.map_or("None".to_string(), |s| format!("[{}]", fmt_slice(s))),
+                    tau.map_or("None".to_string(), |t| format!("[{}]", fmt_slice(t))),
+                )
+            });
+            let fxc: [(&str, &[f64]); 6] = [
+                ("v2rho2", &r.v2rho2),
+                ("v2rhosigma", &r.v2rhosigma),
+                ("v2sigma2", &r.v2sigma2),
+                ("v2rhotau", &r.v2rhotau),
+                ("v2sigmatau", &r.v2sigmatau),
+                ("v2tau2", &r.v2tau2),
+            ];
+            for (name, slice) in fxc {
+                for (k, &v) in slice.iter().enumerate() {
+                    self.fxc_components += 1;
+                    assert!(
+                        v.is_finite(),
+                        "NON-FINITE fxc {name}[{k}] = {v} :: {} (id {}) spin {spin:?} region {regions:?}\n  \
+                         rho   = [{}]\n  sigma = {}",
+                        f.info().name,
+                        id.as_u32(),
+                        fmt_slice(rho),
+                        sigma.map_or("None".to_string(), |s| format!("[{}]", fmt_slice(s))),
+                    );
+                }
+            }
+            self.fxc_evals += 1;
+            for &reg in regions {
+                *self.fxc_by_region.entry(reg).or_insert(0) += 1;
+            }
+        } else {
+            self.fxc_skipped += 1;
+        }
+
         self.evals += 1;
         for &reg in regions {
             *self.by_region.entry(reg).or_insert(0) += 1;
         }
+    }
+}
+
+/// Whether a finite input is inside the **physical domain for second
+/// derivatives**. The `fxc` finiteness contract is bounded to the physical
+/// reduced-gradient range (docs/api-convention.md §4 domain caveat / §8
+/// divergence C): `fxc` overflows f64 at a lower gradient than vxc, so out there
+/// neither library is meaningful and the gate does not chase f64-range behavior.
+///
+/// In domain: screened points (total `< thr`, where every output is exactly 0);
+/// any LDA point (no gradient to overflow, finite across the density range); and
+/// GGA points whose σ is within the documented cap **and** whose per-channel and
+/// total reduced gradients are `≤ FXC_REDUCED_GRAD_MAX`. Mirrors the harness's
+/// flooring/clamping so the predicate sees the same values the evaluator does.
+fn fxc_in_domain(rho: &[f64], sigma: Option<&[f64]>, thr: f64) -> bool {
+    let total: f64 = rho.iter().sum();
+    if total < thr {
+        return true; // screened → exact 0, always finite
+    }
+    let sig = match sigma {
+        Some(s) => s,
+        None => return true, // LDA: smooth over the whole physical density range
+    };
+    if sig.iter().any(|&x| x.abs() > FXC_SIGMA_CAP) {
+        return false;
+    }
+    let st = thr.powf(4.0 / 3.0);
+    let sfloor = st * st; // libxc σ floor = sigma_threshold²
+                          // reduced gradient sqrt(σ_floored)/n_floored^(4/3)
+    let red = |s: f64, nch: f64| s.max(sfloor).sqrt() / nch.max(thr).powf(4.0 / 3.0);
+    if rho.len() == 1 {
+        // unpolarized: per-channel n_a = n/2, σ_aa = σ/4; total uses n, σ
+        let n = rho[0];
+        red(sig[0] / 4.0, n / 2.0) <= FXC_REDUCED_GRAD_MAX && red(sig[0], n) <= FXC_REDUCED_GRAD_MAX
+    } else {
+        let (na, nb) = (rho[0], rho[1]);
+        let (saa, sab, sbb) = (sig[0], sig[1], sig[2]);
+        let saa_f = saa.max(sfloor);
+        let sbb_f = sbb.max(sfloor);
+        let s_ave = 0.5 * (saa_f + sbb_f);
+        let sab_c = sab.clamp(-s_ave, s_ave);
+        let sigma_tot = (saa_f + 2.0 * sab_c + sbb_f).max(0.0);
+        let nt = na + nb;
+        red(saa, na) <= FXC_REDUCED_GRAD_MAX
+            && red(sbb, nb) <= FXC_REDUCED_GRAD_MAX
+            && sigma_tot.sqrt() / nt.max(thr).powf(4.0 / 3.0) <= FXC_REDUCED_GRAD_MAX
     }
 }
 
@@ -156,10 +287,15 @@ fn unpol_densities() -> Vec<(f64, &'static str)> {
 }
 
 /// Unpolarized σ for a given density: exact 0 and tiny (both floored internally),
-/// a sweep targeting reduced gradient `x ≈ s` for `s ∈ {0.01 … 1000}` ("large
-/// sigma"), and absolute-huge values.
+/// the small-σ band the sqrt-free per-spin reduced gradient repaired (old
+/// divergence #4 — `v2sigma2` there is now accurate, not just finite), a sweep
+/// targeting reduced gradient `x ≈ s` for `s ∈ {0.01 … 1000}` ("large sigma"),
+/// and absolute-huge values.
 fn unpol_sigmas(n: f64) -> Vec<(f64, &'static str)> {
     let mut v = vec![(0.0, "sigma_zero"), (1e-30, "sigma_tiny")];
+    for &s in &[1e-6, 1e-8, 1e-10] {
+        v.push((s, "sigma_small_band")); // sqrt-free fxc fix band (divergence #4)
+    }
     let nn = n.max(1e-12);
     for &s in &[0.01, 0.1, 1.0, 10.0, 100.0, 1000.0] {
         v.push((s * s * nn.powf(8.0 / 3.0), "reduced_grad_scaled"));
@@ -215,6 +351,10 @@ fn base_sigma_pairs(na: f64, nb: f64) -> Vec<(f64, f64)> {
     for &s in &[0.1, 1.0, 100.0] {
         v.push((scaled(na, s), scaled(nb, s)));
     }
+    // small absolute σ — the per-spin small-σ band repaired by the sqrt-free
+    // reduced gradient (old divergence #4), now accurate as well as finite.
+    v.push((1e-6, 1e-6));
+    v.push((1e-8, 1e-8));
     v.push((1e-3, 0.0));
     v.push((0.0, 1e-3));
     v.push((1.0, 1e-12));
@@ -261,6 +401,42 @@ fn pol_sigma_triples(na: f64, nb: f64) -> Vec<(f64, f64, f64, &'static str)> {
     v.push((0.2, -0.2, 0.2, "sigma_tot_zero_exact"));
     v.push((0.0, 0.0, 0.0, "sigma_tot_zero_exact"));
     v
+}
+
+/// `K_FACTOR_C = (3/10)(6π²)^(2/3)`: τ_unif,σ = K_FACTOR_C·n_σ^(5/3).
+const K_FACTOR_C: f64 = 4.557_799_872_345_596;
+
+/// τ candidates for an unpolarized meta-GGA point (n, σ): the τ floor, the
+/// von-Weizsäcker edge τ_W = σ/(8n) (α ≈ 0, the τ = τ_W hazard), the iso-orbital
+/// point τ_W + τ_unif (α ≈ 1), a large-α value, and an absolute-large τ — the
+/// τ-ratio hazard class (CLAUDE.md §3). The harness floors τ to 1e-20 and the FHC
+/// clamp keeps σ ≤ 8nτ, so every value yields finite outputs.
+fn unpol_taus(n: f64, sigma: f64) -> Vec<(f64, &'static str)> {
+    let nn = n.max(1e-300);
+    let tw = sigma / (8.0 * nn); // von Weizsäcker τ_W
+    let tunif = K_FACTOR_C * nn.powf(5.0 / 3.0);
+    vec![
+        (0.0, "tau_zero"),
+        (tw, "tau_vw_edge"),       // α ≈ 0
+        (tw + tunif, "alpha_one"), // α ≈ 1
+        (tw + 5.0 * tunif, "alpha_large"),
+        (1e8, "tau_huge"),
+    ]
+}
+
+/// (τ_a, τ_b) candidates for a polarized meta-GGA point: τ floor (both, and one
+/// channel at the floor while the other is physical — the minority-τ edge),
+/// iso-orbital-ish (τ ≈ τ_unif per channel), large-α, and absolute-large.
+fn pol_taus(na: f64, nb: f64) -> Vec<(f64, f64, &'static str)> {
+    let ka = K_FACTOR_C * na.max(1e-300).powf(5.0 / 3.0);
+    let kb = K_FACTOR_C * nb.max(1e-300).powf(5.0 / 3.0);
+    vec![
+        (0.0, 0.0, "tau_zero"),
+        (ka, kb, "alpha_one"),
+        (5.0 * ka, 5.0 * kb, "alpha_large"),
+        (ka, 0.0, "tau_minority_floor"),
+        (1e8, 1e8, "tau_huge"),
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -320,8 +496,9 @@ fn random_pol(rng: &mut StdRng, count: usize) -> Vec<(f64, f64, f64, f64, f64)> 
 // The gate.
 // ---------------------------------------------------------------------------
 
-/// All 12 functionals × both spins must produce only finite outputs over the
-/// densified pathological regions plus a uniform-random supplement.
+/// Every registered functional (`FunctionalId::ALL`) × both spins must produce
+/// only finite outputs over the densified pathological regions plus a
+/// uniform-random supplement.
 #[test]
 fn fuzz_all_functionals_finite() {
     let mut census = Census::new();
@@ -338,23 +515,61 @@ fn fuzz_all_functionals_finite() {
         for &spin in &[Spin::Unpolarized, Spin::Polarized] {
             let f = Functional::new(id, spin).expect("v0.1 functional must build");
             let needs_sigma = f.info().needs_sigma;
+            let needs_tau = f.info().needs_tau;
 
             match spin {
                 Spin::Unpolarized => {
                     for &(n, dreg) in &unpol_dens {
                         if needs_sigma {
                             for (s, sreg) in unpol_sigmas(n) {
-                                census.check(&f, id, spin, &[n], Some(&[s]), &[dreg, sreg]);
+                                if needs_tau {
+                                    for (t, treg) in unpol_taus(n, s) {
+                                        census.check(
+                                            &f,
+                                            id,
+                                            spin,
+                                            &[n],
+                                            Some(&[s]),
+                                            Some(&[t]),
+                                            &[dreg, sreg, treg],
+                                        );
+                                    }
+                                } else {
+                                    census.check(
+                                        &f,
+                                        id,
+                                        spin,
+                                        &[n],
+                                        Some(&[s]),
+                                        None,
+                                        &[dreg, sreg],
+                                    );
+                                }
                             }
                         } else {
-                            census.check(&f, id, spin, &[n], None, &[dreg]);
+                            census.check(&f, id, spin, &[n], None, None, &[dreg]);
                         }
                     }
                     for &(n, s) in &unpol_rand {
                         if needs_sigma {
-                            census.check(&f, id, spin, &[n], Some(&[s]), &["random"]);
+                            if needs_tau {
+                                // a couple of τ per random point (floor + iso-orbital)
+                                for (t, _) in unpol_taus(n, s).into_iter().take(3) {
+                                    census.check(
+                                        &f,
+                                        id,
+                                        spin,
+                                        &[n],
+                                        Some(&[s]),
+                                        Some(&[t]),
+                                        &["random"],
+                                    );
+                                }
+                            } else {
+                                census.check(&f, id, spin, &[n], Some(&[s]), None, &["random"]);
+                            }
                         } else {
-                            census.check(&f, id, spin, &[n], None, &["random"]);
+                            census.check(&f, id, spin, &[n], None, None, &["random"]);
                         }
                     }
                 }
@@ -362,31 +577,61 @@ fn fuzz_all_functionals_finite() {
                     for &(na, nb, dreg) in &pol_pairs {
                         if needs_sigma {
                             for (saa, sab, sbb, sreg) in pol_sigma_triples(na, nb) {
+                                if needs_tau {
+                                    for (ta, tb, treg) in pol_taus(na, nb) {
+                                        census.check(
+                                            &f,
+                                            id,
+                                            spin,
+                                            &[na, nb],
+                                            Some(&[saa, sab, sbb]),
+                                            Some(&[ta, tb]),
+                                            &[dreg, sreg, treg],
+                                        );
+                                    }
+                                } else {
+                                    census.check(
+                                        &f,
+                                        id,
+                                        spin,
+                                        &[na, nb],
+                                        Some(&[saa, sab, sbb]),
+                                        None,
+                                        &[dreg, sreg],
+                                    );
+                                }
+                            }
+                        } else {
+                            census.check(&f, id, spin, &[na, nb], None, None, &[dreg]);
+                        }
+                    }
+                    for &(na, nb, saa, sab, sbb) in &pol_rand {
+                        if needs_sigma {
+                            if needs_tau {
+                                for (ta, tb, _) in pol_taus(na, nb).into_iter().take(3) {
+                                    census.check(
+                                        &f,
+                                        id,
+                                        spin,
+                                        &[na, nb],
+                                        Some(&[saa, sab, sbb]),
+                                        Some(&[ta, tb]),
+                                        &["random"],
+                                    );
+                                }
+                            } else {
                                 census.check(
                                     &f,
                                     id,
                                     spin,
                                     &[na, nb],
                                     Some(&[saa, sab, sbb]),
-                                    &[dreg, sreg],
+                                    None,
+                                    &["random"],
                                 );
                             }
                         } else {
-                            census.check(&f, id, spin, &[na, nb], None, &[dreg]);
-                        }
-                    }
-                    for &(na, nb, saa, sab, sbb) in &pol_rand {
-                        if needs_sigma {
-                            census.check(
-                                &f,
-                                id,
-                                spin,
-                                &[na, nb],
-                                Some(&[saa, sab, sbb]),
-                                &["random"],
-                            );
-                        } else {
-                            census.check(&f, id, spin, &[na, nb], None, &["random"]);
+                            census.check(&f, id, spin, &[na, nb], None, None, &["random"]);
                         }
                     }
                 }
@@ -406,8 +651,13 @@ fn fuzz_all_functionals_finite() {
     );
     println!("evaluations crediting each region (summed over all functionals/spins):");
     for (region, n) in &census.by_region {
-        println!("  {region:<28} {n:>9}");
+        let fxc = census.fxc_by_region.get(region).copied().unwrap_or(0);
+        println!("  {region:<28} vxc {n:>9}   fxc {fxc:>9}");
     }
+    println!(
+        "fxc: {} evaluations checked, {} finiteness checks, {} skipped (out of physical domain)",
+        census.fxc_evals, census.fxc_components, census.fxc_skipped
+    );
     println!("=== all outputs finite ===\n");
 }
 
@@ -426,24 +676,39 @@ fn batch_matches_single_point() {
         (2.0, 1.0, 1e6, 0.0, 1e6),     // large σ
     ];
 
+    // Per-point τ (for meta-GGA): physical-ish iso-orbital values, plus the τ
+    // floor where τ would otherwise be 0.
+    let taus: &[(f64, f64)] = &[
+        (0.4, 0.25),
+        (0.5, 1e-20),
+        (0.3, 0.3),
+        (0.6, 1e-12),
+        (1e-20, 1e-20),
+        (5.0, 3.0),
+    ];
+
     for &id in FunctionalId::ALL {
         let f = Functional::new(id, Spin::Polarized).unwrap();
         let needs_sigma = f.info().needs_sigma;
+        let needs_tau = f.info().needs_tau;
         let np = pol.len();
 
         let mut rho = Vec::with_capacity(2 * np);
         let mut sig = Vec::with_capacity(3 * np);
-        for &(na, nb, saa, sab, sbb) in pol {
+        let mut tau = Vec::with_capacity(2 * np);
+        for (&(na, nb, saa, sab, sbb), &(ta, tb)) in pol.iter().zip(taus) {
             rho.push(na);
             rho.push(nb);
             sig.push(saa);
             sig.push(sab);
             sig.push(sbb);
+            tau.push(ta);
+            tau.push(tb);
         }
-        let input = if needs_sigma {
-            XcInput::gga(&rho, &sig)
-        } else {
-            XcInput::lda(&rho)
+        let input = match (needs_sigma, needs_tau) {
+            (true, true) => XcInput::gga(&rho, &sig).with_tau(&tau),
+            (true, false) => XcInput::gga(&rho, &sig),
+            _ => XcInput::lda(&rho),
         };
         let batch = f.eval(np, &input).unwrap();
 
@@ -464,13 +729,16 @@ fn batch_matches_single_point() {
         }
 
         // and identical to evaluating each point alone
-        for (i, &(na, nb, saa, sab, sbb)) in pol.iter().enumerate() {
+        for (i, (&(na, nb, saa, sab, sbb), &(ta, tb))) in pol.iter().zip(taus).enumerate() {
             let rho1 = [na, nb];
             let sig1 = [saa, sab, sbb];
-            let one = if needs_sigma {
-                f.eval(1, &XcInput::gga(&rho1, &sig1)).unwrap()
-            } else {
-                f.eval(1, &XcInput::lda(&rho1)).unwrap()
+            let tau1 = [ta, tb];
+            let one = match (needs_sigma, needs_tau) {
+                (true, true) => f
+                    .eval(1, &XcInput::gga(&rho1, &sig1).with_tau(&tau1))
+                    .unwrap(),
+                (true, false) => f.eval(1, &XcInput::gga(&rho1, &sig1)).unwrap(),
+                _ => f.eval(1, &XcInput::lda(&rho1)).unwrap(),
             };
             assert_eq!(
                 batch.exc[i].to_bits(),
@@ -492,6 +760,16 @@ fn batch_matches_single_point() {
                         batch.vsigma[3 * i + c].to_bits(),
                         one.vsigma[c].to_bits(),
                         "{} vsigma[{i}][{c}]",
+                        f.info().name
+                    );
+                }
+            }
+            if needs_tau {
+                for c in 0..2 {
+                    assert_eq!(
+                        batch.vtau[2 * i + c].to_bits(),
+                        one.vtau[c].to_bits(),
+                        "{} vtau[{i}][{c}]",
                         f.info().name
                     );
                 }

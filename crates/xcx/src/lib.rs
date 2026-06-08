@@ -6,9 +6,9 @@
 //!
 //! `xcx` evaluates exchange–correlation (XC) functionals: given a density (and,
 //! depending on the functional, its gradient / kinetic energy density), it
-//! returns the XC energy per particle and its first derivatives, together with
-//! metadata (family, requirements, exact-exchange fraction, range-separation and
-//! VV10 parameters).
+//! returns the XC energy per particle, its first and second derivatives (`vxc`
+//! and `fxc`), together with metadata (family, requirements, exact-exchange
+//! fraction, range-separation and VV10 parameters).
 //!
 //! Each functional is written once as a scalar energy expression; derivatives are
 //! obtained by forward-mode automatic differentiation, so they are correct by

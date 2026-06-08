@@ -5,7 +5,7 @@
 //! LDA family: energy trait, autodiff harness, object-safe wrapper.
 
 use nalgebra::SVector;
-use num_dual::{gradient, DualNum, DualSVec64};
+use num_dual::{gradient, hessian, Dual2SVec64, DualNum, DualSVec64};
 
 use super::{check_len, XcEval};
 use crate::error::XcError;
@@ -53,9 +53,55 @@ impl<F: LdaEnergy> XcEval for Lda<F> {
             Spin::Polarized => self.eval_pol(np, input),
         }
     }
+
+    fn eval_fxc(&self, spin: Spin, np: usize, input: &XcInput) -> Result<XcResult, XcError> {
+        match spin {
+            Spin::Unpolarized => self.eval_fxc_unpol(np, input),
+            Spin::Polarized => self.eval_fxc_pol(np, input),
+        }
+    }
 }
 
 impl<F: LdaEnergy> Lda<F> {
+    /// Unpolarized energy density `e = n·f` at one point, generic over the dual
+    /// scalar `N` so the *same* expression feeds both the gradient (vxc) and the
+    /// Hessian (fxc) harness — there is one source of truth for the math. Seed
+    /// vector is `[n]`.
+    fn energy_unpol<N: DualNum<f64> + Copy>(&self, x: &SVector<N, 1>) -> N {
+        let n = x[0];
+        let rs = vars::rs_from_n(n);
+        let one = N::from(1.0);
+        let half = n * N::from(0.5);
+        n * self.0.f(LdaVars {
+            rs,
+            z: N::from(0.0),
+            opz: one,
+            omz: one,
+            na: half,
+            nb: half,
+        })
+    }
+
+    /// Polarized energy density `e = n·f` at one point, generic over `N`. Seed
+    /// vector is `[n_a, n_b]` (the floored spin densities).
+    fn energy_pol<N: DualNum<f64> + Copy>(&self, x: &SVector<N, 2>) -> N {
+        let na = x[0];
+        let nb = x[1];
+        let n = na + nb;
+        let rs = vars::rs_from_n(n);
+        let z = (na - nb) / n;
+        let opz = (na + na) / n; // 1 + z, cancellation-free
+        let omz = (nb + nb) / n; // 1 − z, cancellation-free
+        n * self.0.f(LdaVars {
+            rs,
+            z,
+            opz,
+            omz,
+            na,
+            nb,
+        })
+    }
+
     fn eval_unpol(&self, np: usize, input: &XcInput) -> Result<XcResult, XcError> {
         check_len(input.rho, np)?;
         let thr = self.0.info().dens_threshold;
@@ -68,21 +114,7 @@ impl<F: LdaEnergy> Lda<F> {
             }
             let nf = n.max(thr); // libxc floors the density to dens_threshold
             let (e, g) = gradient(
-                |v: SVector<DualSVec64<1>, 1>| {
-                    let n = v[0];
-                    let rs = vars::rs_from_n(n);
-                    let one = DualSVec64::<1>::from(1.0);
-                    let zero = DualSVec64::<1>::from(0.0);
-                    let half = n * DualSVec64::<1>::from(0.5);
-                    n * self.0.f(LdaVars {
-                        rs,
-                        z: zero,
-                        opz: one,
-                        omz: one,
-                        na: half,
-                        nb: half,
-                    })
-                },
+                |v: SVector<DualSVec64<1>, 1>| self.energy_unpol(&v),
                 &SVector::<f64, 1>::from([nf]),
             );
             exc[i] = e / nf;
@@ -115,23 +147,7 @@ impl<F: LdaEnergy> Lda<F> {
             let nb_f = nb.max(thr);
             let n_f = na_f + nb_f;
             let (e, g) = gradient(
-                |v: SVector<DualSVec64<2>, 2>| {
-                    let na = v[0];
-                    let nb = v[1];
-                    let n = na + nb;
-                    let rs = vars::rs_from_n(n);
-                    let z = (na - nb) / n;
-                    let opz = (na + na) / n; // 1 + z, cancellation-free
-                    let omz = (nb + nb) / n; // 1 − z, cancellation-free
-                    n * self.0.f(LdaVars {
-                        rs,
-                        z,
-                        opz,
-                        omz,
-                        na,
-                        nb,
-                    })
-                },
+                |v: SVector<DualSVec64<2>, 2>| self.energy_pol(&v),
                 &SVector::<f64, 2>::from([na_f, nb_f]),
             );
             exc[i] = e / n_f;
@@ -141,6 +157,75 @@ impl<F: LdaEnergy> Lda<F> {
         Ok(XcResult {
             exc,
             vrho,
+            ..Default::default()
+        })
+    }
+
+    /// Second-order (`fxc`) unpolarized harness: same screening/flooring/seeding
+    /// as [`eval_unpol`](Self::eval_unpol), but evaluates the shared energy via
+    /// num-dual's `hessian`, which also returns the value and gradient — so `exc`
+    /// and `vrho` come out for free. `v2rho2[i] = ∂²e/∂n²`.
+    fn eval_fxc_unpol(&self, np: usize, input: &XcInput) -> Result<XcResult, XcError> {
+        check_len(input.rho, np)?;
+        let thr = self.0.info().dens_threshold;
+        let mut exc = vec![0.0; np];
+        let mut vrho = vec![0.0; np];
+        let mut v2rho2 = vec![0.0; np];
+        for i in 0..np {
+            let n = input.rho[i];
+            if n < thr || n.is_nan() {
+                continue; // below threshold: energy and every derivative stay 0
+            }
+            let nf = n.max(thr);
+            let (e, g, h) = hessian(
+                |v: SVector<Dual2SVec64<1>, 1>| self.energy_unpol(&v),
+                &SVector::<f64, 1>::from([nf]),
+            );
+            exc[i] = e / nf;
+            vrho[i] = g[0];
+            v2rho2[i] = h[(0, 0)];
+        }
+        Ok(XcResult {
+            exc,
+            vrho,
+            v2rho2,
+            ..Default::default()
+        })
+    }
+
+    /// Second-order (`fxc`) polarized harness. `v2rho2` packs the symmetric 2×2
+    /// density Hessian as `[aa, ab, bb]`, matching libxc's xc.h ordering.
+    fn eval_fxc_pol(&self, np: usize, input: &XcInput) -> Result<XcResult, XcError> {
+        check_len(input.rho, 2 * np)?;
+        let thr = self.0.info().dens_threshold;
+        let mut exc = vec![0.0; np];
+        let mut vrho = vec![0.0; 2 * np];
+        let mut v2rho2 = vec![0.0; 3 * np];
+        for i in 0..np {
+            let na = input.rho[2 * i];
+            let nb = input.rho[2 * i + 1];
+            let n = na + nb;
+            if n < thr || n.is_nan() {
+                continue;
+            }
+            let na_f = na.max(thr);
+            let nb_f = nb.max(thr);
+            let n_f = na_f + nb_f;
+            let (e, g, h) = hessian(
+                |v: SVector<Dual2SVec64<2>, 2>| self.energy_pol(&v),
+                &SVector::<f64, 2>::from([na_f, nb_f]),
+            );
+            exc[i] = e / n_f;
+            vrho[2 * i] = g[0];
+            vrho[2 * i + 1] = g[1];
+            v2rho2[3 * i] = h[(0, 0)]; // ∂²/∂n_a²
+            v2rho2[3 * i + 1] = h[(0, 1)]; // ∂²/∂n_a∂n_b
+            v2rho2[3 * i + 2] = h[(1, 1)]; // ∂²/∂n_b²
+        }
+        Ok(XcResult {
+            exc,
+            vrho,
+            v2rho2,
             ..Default::default()
         })
     }

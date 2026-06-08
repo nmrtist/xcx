@@ -25,23 +25,52 @@ use crate::reduced::vars::{mphi, tt_sq};
 
 // PBE correlation parameters (gga_c_pbe.c `pbe_values`): libxc's exact literals.
 // gamma = (1 − ln2)/π² (the literal libxc stores), beta the PBE constant.
-// BB = tscale = 1 are folded in where used.
-const BETA: f64 = 0.066_724_550_603_149_22;
-const GAMMA: f64 = 0.031_090_690_869_654_895;
+// BB = tscale = 1 are folded in where used. `pub(crate)` so r2SCAN correlation
+// reuses the *same* literals (its `mgamma`/`mbeta` base; reuse rule, no fork).
+// `beta` is the *only* parameter that differs across the PBE-c family — PBEsol-c
+// (`gga_c_pbe_sol`) swaps it to 0.046, γ unchanged — so [`pbe_c_energy`] takes it
+// as an argument rather than the family forking the H math (CLAUDE.md §2/§3).
+pub(crate) const BETA: f64 = 0.066_724_550_603_149_22;
+pub(crate) const GAMMA: f64 = 0.031_090_690_869_654_895;
 
 /// PBE correlation gradient correction `H(rs, ζ, t²)` (gga_c_pbe.mpl eq. 7), given
-/// the uniform-gas `ε_c`, `φ(ζ)`, and the **squared** reduced gradient `t²`:
+/// the uniform-gas `ε_c`, `φ(ζ)`, the **squared** reduced gradient `t²`, and the
+/// family `β` constant:
 /// `A = β / (γ·expm1(−ε_c/(γφ³)))`, `f1 = t² + A (t²)²`,
 /// `f2 = β f1 / (γ(1 + A f1))`, `H = γ φ³ · log1p(f2)`.
 /// `H` depends on `t` only through `t²`/`t⁴`, so it takes `t²` directly (no `√`).
 /// `expm1`/`log1p` keep the low-density (`ε_c → 0`) and small-`t` limits
-/// cancellation-free, matching libxc's `xc_expm1`/`xc_log1p`.
-fn pbe_h<N: DualNum<f64> + Copy>(ec_unif: N, phi: N, t2: N) -> N {
+/// cancellation-free, matching libxc's `xc_expm1`/`xc_log1p`. `γ` is shared
+/// (`GAMMA`); only `β` varies across the family (PBE 0.06672… vs PBEsol 0.046).
+fn pbe_h<N: DualNum<f64> + Copy>(ec_unif: N, phi: N, t2: N, beta: f64) -> N {
     let phi3 = phi * phi * phi;
-    let a = N::from(BETA) / (N::from(GAMMA) * (-ec_unif / (N::from(GAMMA) * phi3)).exp_m1());
+    let a = N::from(beta) / (N::from(GAMMA) * (-ec_unif / (N::from(GAMMA) * phi3)).exp_m1());
     let f1 = t2 + a * t2 * t2; // t² + A·t⁴  (BB = 1)
-    let f2 = N::from(BETA) * f1 / (N::from(GAMMA) * (N::from(1.0) + a * f1));
+    let f2 = N::from(beta) * f1 / (N::from(GAMMA) * (N::from(1.0) + a * f1));
     N::from(GAMMA) * phi3 * f2.ln_1p()
+}
+
+/// PBE correlation energy per particle `f_pbe(rs, z, x_t²) = ε_c^unif + H`, as a
+/// free function of the Wigner–Seitz radius, spin polarization, **squared** total
+/// reduced gradient, and the family `β` constant. The uniform limit is the SHARED
+/// [`pw92_ec`] with the **modified** PW92 parametrization ([`A_MOD`] + exact
+/// `f''(0)` = [`FPP_VWN`]). This is the single source of the PBE-correlation math:
+/// [`GgaCPbe::f`] passes PBE's [`BETA`], PBEsol-c (`gga_c_pbe_sol`) passes 0.046,
+/// and the meta-GGA `mgga_c_tpss` (built on PBE-C) passes [`BETA`]. Per the reuse
+/// rule, all go through here rather than forking a copy (recovery test
+/// [`tests::beta_pbe_recovers_gga_c_pbe`] pins `β = BETA` to this function).
+/// Provenance: ported-from-libxc (MPL-2.0), `maple/gga_exc/gga_c_pbe.mpl`.
+pub(crate) fn pbe_c_energy<N: DualNum<f64> + Copy>(
+    rs: N,
+    z: N,
+    xt2: N,
+    zeta_threshold: f64,
+    beta: f64,
+) -> N {
+    let ec_unif = pw92_ec(rs, z, zeta_threshold, &A_MOD, FPP_VWN);
+    let phi = mphi(z, zeta_threshold);
+    let t2 = tt_sq(rs, xt2, phi);
+    ec_unif + pbe_h(ec_unif, phi, t2, beta)
 }
 
 pub(crate) struct GgaCPbe {
@@ -78,12 +107,10 @@ impl GgaEnergy for GgaCPbe {
     }
 
     fn f<N: DualNum<f64> + Copy>(&self, v: GgaVars<N>) -> N {
-        let zt = self.zeta_threshold;
-        // Uniform-gas limit: the SHARED pw92_ec, MODIFIED parametrization.
-        let ec_unif = pw92_ec(v.rs, v.z, zt, &A_MOD, FPP_VWN);
-        let phi = mphi(v.z, zt);
-        let t2 = tt_sq(v.rs, v.xt2, phi);
-        ec_unif + pbe_h(ec_unif, phi, t2)
+        // PBE correlation = uniform-gas limit (shared, modified PW92) + gradient
+        // correction H, via the shared free function (the single source of truth,
+        // also used by gga_c_pbe_sol and mgga_c_tpss). PBE uses β = BETA.
+        pbe_c_energy(v.rs, v.z, v.xt2, self.zeta_threshold, BETA)
     }
 }
 

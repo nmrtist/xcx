@@ -74,14 +74,41 @@ fn golden_snapshots_match() {
                 .unwrap_or_else(|e| panic!("building {} ({}): {e:?}", c.functional, c.spin));
             let input = if c.sigma.is_empty() {
                 XcInput::lda(&c.rho)
-            } else {
+            } else if c.tau.is_empty() {
                 XcInput::gga(&c.rho, &c.sigma)
+            } else {
+                XcInput::gga(&c.rho, &c.sigma).with_tau(&c.tau)
             };
             let out = f.eval(c.np, &input).unwrap();
             cmp(c, "exc", &out.exc, &c.exc);
             cmp(c, "vrho", &out.vrho, &c.vrho);
             if !c.vsigma.is_empty() {
                 cmp(c, "vsigma", &out.vsigma, &c.vsigma);
+            }
+            if !c.vtau.is_empty() {
+                cmp(c, "vtau", &out.vtau, &c.vtau);
+            }
+            // Second derivatives: only cases generated through second order carry
+            // fxc; vxc-only snapshots leave these empty and are skipped here.
+            if !c.v2rho2.is_empty() {
+                let f2 = f.eval_fxc(c.np, &input).unwrap();
+                cmp(c, "v2rho2", &f2.v2rho2, &c.v2rho2);
+                if !c.v2rhosigma.is_empty() {
+                    cmp(c, "v2rhosigma", &f2.v2rhosigma, &c.v2rhosigma);
+                }
+                if !c.v2sigma2.is_empty() {
+                    cmp(c, "v2sigma2", &f2.v2sigma2, &c.v2sigma2);
+                }
+                // meta-GGA τ second-derivative blocks
+                if !c.v2rhotau.is_empty() {
+                    cmp(c, "v2rhotau", &f2.v2rhotau, &c.v2rhotau);
+                }
+                if !c.v2sigmatau.is_empty() {
+                    cmp(c, "v2sigmatau", &f2.v2sigmatau, &c.v2sigmatau);
+                }
+                if !c.v2tau2.is_empty() {
+                    cmp(c, "v2tau2", &f2.v2tau2, &c.v2tau2);
+                }
             }
             checked += 1;
         }

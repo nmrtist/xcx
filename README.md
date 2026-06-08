@@ -13,9 +13,9 @@ and trivial cross-compilation.
 ## What it does
 
 Given a density (and, depending on the functional, its gradient and/or kinetic
-energy density), `xcx` returns the XC **energy per particle** and its first
-derivatives, plus rich **metadata** (family, input requirements, exact-exchange
-fraction, range-separation and VV10 parameters).
+energy density), `xcx` returns the XC **energy per particle**, its **first and
+second derivatives** (`vxc` and `fxc`), plus rich **metadata** (family, input
+requirements, exact-exchange fraction, range-separation and VV10 parameters).
 
 Each functional is written **once** as a single scalar energy expression;
 derivatives are obtained by **forward-mode automatic differentiation**
@@ -38,7 +38,7 @@ semver-stable data/ABI contract.
 
 ```toml
 [dependencies]
-xcx = "0.1"
+xcx = "0.2"
 ```
 
 MSRV: Rust 1.87.
@@ -61,28 +61,39 @@ fn main() -> Result<(), xcx::XcError> {
 }
 ```
 
-## Implemented functionals (v0.1)
+## Implemented functionals
 
-All with **energy + all first derivatives**, in **both** spin-polarized and
-unpolarized modes. The parenthesised number is the libxc functional id.
+All with **energy, all first derivatives, and second derivatives (`fxc`)**, in
+**both** spin-polarized and unpolarized modes. The parenthesised number is the
+libxc functional id.
 
-| Family  | Functional | libxc id | Notes |
-|---------|------------|----------|-------|
-| LDA     | `lda_x`            | 1   | Slater exchange |
-| LDA     | `lda_c_pw`         | 12  | PW92 correlation |
-| LDA     | `lda_c_vwn`        | 7   | VWN5 |
-| LDA     | `lda_c_vwn_3`      | 30  | VWN3 |
-| LDA     | `lda_c_vwn_rpa`    | 8   | VWN5 (RPA) |
-| GGA     | `gga_x_pbe`        | 101 | PBE exchange |
-| GGA     | `gga_c_pbe`        | 130 | PBE correlation |
-| GGA     | `gga_x_b88`        | 106 | Becke 88 exchange |
-| GGA     | `gga_c_lyp`        | 131 | Lee–Yang–Parr correlation |
-| Hybrid  | `hyb_gga_xc_b3lyp` | 402 | B3LYP — uses **VWN_RPA** (matching libxc 402) |
-| Hybrid  | `hyb_gga_xc_b3lyp5`| 475 | B3LYP/VWN5 |
-| Hybrid  | `hyb_gga_xc_pbeh`  | 406 | PBE0 |
+| Family   | Functional | libxc id | Notes |
+|----------|------------|----------|-------|
+| LDA      | `lda_x`            | 1   | Slater exchange |
+| LDA      | `lda_c_pw`         | 12  | PW92 correlation |
+| LDA      | `lda_c_vwn`        | 7   | VWN5 |
+| LDA      | `lda_c_vwn_3`      | 30  | VWN3 |
+| LDA      | `lda_c_vwn_rpa`    | 8   | VWN5 (RPA) |
+| GGA      | `gga_x_pbe`        | 101 | PBE exchange |
+| GGA      | `gga_x_pbe_r`      | 102 | revPBE exchange |
+| GGA      | `gga_x_pbe_sol`    | 116 | PBEsol exchange |
+| GGA      | `gga_x_rpbe`       | 117 | RPBE exchange (exponential enhancement) |
+| GGA      | `gga_c_pbe`        | 130 | PBE correlation |
+| GGA      | `gga_c_pbe_sol`    | 133 | PBEsol correlation |
+| GGA      | `gga_x_b88`        | 106 | Becke 88 exchange |
+| GGA      | `gga_c_lyp`        | 131 | Lee–Yang–Parr correlation |
+| meta-GGA | `mgga_x_tpss`      | 202 | TPSS exchange |
+| meta-GGA | `mgga_c_tpss`      | 231 | TPSS correlation |
+| meta-GGA | `mgga_x_r2scan`    | 497 | r²SCAN exchange |
+| meta-GGA | `mgga_c_r2scan`    | 498 | r²SCAN correlation |
+| meta-GGA | `mgga_x_m06_l`     | 203 | M06-L exchange |
+| meta-GGA | `mgga_c_m06_l`     | 233 | M06-L correlation |
+| Hybrid   | `hyb_gga_xc_b3lyp` | 402 | B3LYP — uses **VWN_RPA** (matching libxc 402) |
+| Hybrid   | `hyb_gga_xc_b3lyp5`| 475 | B3LYP/VWN5 |
+| Hybrid   | `hyb_gga_xc_pbeh`  | 406 | PBE0 |
 
-Meta-GGA, range-separated hybrids, and second derivatives (`fxc`) are planned
-post-v0.1 via the same AD path.
+Range-separated (CAM) hybrids and the meta-GGA Laplacian (`lapl`) path are
+planned via the same AD framework.
 
 ## Verification
 

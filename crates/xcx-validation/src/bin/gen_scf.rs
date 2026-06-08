@@ -363,9 +363,18 @@ mod imp {
             np: nps,
             rho,
             sigma,
+            tau: vec![], // hyb-GGA: no τ
             exc,
             vrho,
             vsigma,
+            vtau: vec![],
+            // SCF-grid cases are vxc-only.
+            v2rho2: vec![],
+            v2rhosigma: vec![],
+            v2sigma2: vec![],
+            v2rhotau: vec![],
+            v2sigmatau: vec![],
+            v2tau2: vec![],
         };
         let path: PathBuf = testdata.join(format!("scf_grid_{}.json", fg.case));
         std::fs::write(&path, serde_json::to_string_pretty(&vec![case]).unwrap()).unwrap();

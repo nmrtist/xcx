@@ -134,16 +134,13 @@ impl GgaEnergy for GgaCLyp {
 
     fn f<N: DualNum<f64> + Copy>(&self, v: GgaVars<N>) -> N {
         // rr = rs/RS_FACTOR = n^(-1/3); LYP uses only the squared reduced
-        // gradients (xt2 directly; xs0²/xs1² from the per-spin magnitudes).
+        // gradients — the total `xt2` and the per-spin `xs0_sq`/`xs1_sq`, all
+        // carried sqrt-free by the harness. LYP is *linear* in σ, so its true
+        // `v2sigma2` is exactly 0; consuming the squared gradients directly (no
+        // `√σ`) makes the AD return exactly 0 too, instead of cancellation
+        // garbage that blows up as σ → 0 (divergence #4).
         let rr = v.rs / N::from(RS_FACTOR);
-        lyp_energy(
-            rr,
-            v.z,
-            v.xt2,
-            v.xs0 * v.xs0,
-            v.xs1 * v.xs1,
-            self.zeta_threshold,
-        )
+        lyp_energy(rr, v.z, v.xt2, v.xs0_sq, v.xs1_sq, self.zeta_threshold)
     }
 }
 

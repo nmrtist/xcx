@@ -1,6 +1,6 @@
 [package]
 name = "xcx"
-version = "0.1.0"
+version = "0.2.0"
 description = "Exchange–correlation functionals for density-functional theory (DFT) — pure-Rust, libxc-compatible"
 keywords = ["dft", "quantum-chemistry", "libxc", "physics", "chemistry"]
 categories = ["science", "mathematics"]

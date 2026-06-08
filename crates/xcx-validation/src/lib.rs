@@ -33,6 +33,9 @@ pub struct GoldenCase {
     /// Packed `sigma` input (empty for LDA).
     #[serde(default)]
     pub sigma: Vec<f64>,
+    /// Packed `tau` input (meta-GGA only; empty otherwise).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tau: Vec<f64>,
     /// libxc `zk` (energy per particle).
     pub exc: Vec<f64>,
     /// libxc `vrho`.
@@ -40,6 +43,29 @@ pub struct GoldenCase {
     /// libxc `vsigma` (empty for LDA).
     #[serde(default)]
     pub vsigma: Vec<f64>,
+    /// libxc `vtau` (meta-GGA only; empty otherwise).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vtau: Vec<f64>,
+    /// libxc `v2rho2` (`fxc`). Empty unless this case was generated through
+    /// second order; when empty the golden test skips the `fxc` comparison, so
+    /// vxc-only snapshots stay valid (additive, backward-compatible).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub v2rho2: Vec<f64>,
+    /// libxc `v2rhosigma` (`fxc`; empty for LDA or vxc-only cases).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub v2rhosigma: Vec<f64>,
+    /// libxc `v2sigma2` (`fxc`; empty for LDA or vxc-only cases).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub v2sigma2: Vec<f64>,
+    /// libxc `v2rhotau` (`fxc`; meta-GGA only, empty otherwise).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub v2rhotau: Vec<f64>,
+    /// libxc `v2sigmatau` (`fxc`; meta-GGA only, empty otherwise).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub v2sigmatau: Vec<f64>,
+    /// libxc `v2tau2` (`fxc`; meta-GGA only, empty otherwise).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub v2tau2: Vec<f64>,
 }
 
 /// Relative-with-absolute-floor closeness test used across the golden suite:
