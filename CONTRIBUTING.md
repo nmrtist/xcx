@@ -1,14 +1,21 @@
 # Contributing to xcx
 
-Thanks for your interest in contributing! `xcx` is a faithful, pure-Rust
-reimplementation of [libxc](https://libxc.gitlab.io/). The bar for changes is
-**numerical fidelity**: anything that touches functional math must reproduce
-pinned libxc to ≤ 1e-10.
+Thanks for your interest in contributing! `xcx` is a pure-Rust XC-functional
+library built on automatic differentiation; it keeps
+[libxc](https://libxc.gitlab.io/) ids and conventions for interoperability and
+ships functionals of its own beyond libxc. The bar for changes is **numerical
+fidelity**: anything that touches functional math must reproduce pinned libxc
+to ≤ 1e-10 where the two overlap, or be verified against the published
+literature where they don't.
 
 ## Ground rules
 
-- All contributions are licensed under the **Mozilla Public License 2.0**
-  (see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE)). MPL is file-level copyleft.
+- Licensing is **per file** (see [`NOTICE`](NOTICE)): original xcx code is
+  **MIT OR Apache-2.0** ([`LICENSE-MIT`](LICENSE-MIT),
+  [`LICENSE-APACHE`](LICENSE-APACHE)); files derived from libxc stay under the
+  **MPL-2.0** ([`LICENSE-MPL`](LICENSE-MPL)). New original work (clean-room
+  functionals, API/harness code, tests) is contributed under MIT OR
+  Apache-2.0; modifications to MPL-tagged files remain MPL.
 - Keep the scope fence (see [`docs/api-convention.md`](docs/api-convention.md)):
   xcx maps `(rho, sigma, tau[, lapl]) → energy + derivatives + metadata`. No
   grids, AO evaluation, SCF, or dispersion.
@@ -51,10 +58,13 @@ Regenerating snapshots requires libxc and the `libxc-ffi` feature — see
 2. Reuse shared building blocks rather than forking copies (e.g. `pw92_ec`,
    the shared GGA-exchange skeleton, the VWN rows).
 3. Tag the file's provenance: `Provenance: ported-from-libxc` (derived from libxc
-   Maple/C) or `Provenance: clean-room` (from published literature). Every source
-   file also carries the MPL-2.0 standard header.
+   Maple/C — carries the MPL-2.0 header) or `Provenance: clean-room` (from
+   published literature — carries the `SPDX-License-Identifier: MIT OR
+   Apache-2.0` header).
 4. Add golden snapshots and confirm ≤ 1e-10 against libxc, including edge cases
-   (full spin polarization, small/large `rho` and `sigma`).
+   (full spin polarization, small/large `rho` and `sigma`). For functionals
+   with no libxc counterpart, verify via `xc_func_set_ext_params`
+   re-parameterization where possible and literature reproduction otherwise.
 5. Wire the id into the registry; `build()` matches every id explicitly.
 
 ## Numerical-stability changes

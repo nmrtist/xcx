@@ -1,7 +1,7 @@
 [package]
 name = "xcx"
-version = "0.2.0"
-description = "Exchange–correlation functionals for density-functional theory (DFT) — pure-Rust, libxc-compatible"
+version = "0.3.0"
+description = "Exchange–correlation functionals for DFT in pure Rust — autodiff derivatives (vxc/fxc), double hybrids, libxc-interoperable ids"
 keywords = ["dft", "quantum-chemistry", "libxc", "physics", "chemistry"]
 categories = ["science", "mathematics"]
 readme = "README.md"
@@ -16,6 +16,7 @@ homepage.workspace = true
 [dependencies]
 num-dual.workspace = true
 nalgebra.workspace = true
+libm.workspace = true
 
 [dev-dependencies]
 approx.workspace = true

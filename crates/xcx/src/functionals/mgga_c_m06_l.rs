@@ -31,7 +31,7 @@
 //! curvature. Grouped per channel, the same `stoll_par(±z)` multiplies both the
 //! M05 and VSXC same-spin terms, and `stoll_perp` both opposite-spin terms.
 //!
-//! **Reuse (CLAUDE.md §2).** `f_pw` is the **shared** [`pw92_ec`] with the
+//! **Reuse (CONTRIBUTING.md).** `f_pw` is the **shared** [`pw92_ec`] with the
 //! *modified* PW92 parametrization ([`A_MOD`] + exact `f''(0)` = [`FPP_VWN`]) —
 //! the same uniform limit PBE-C and r2SCAN-c use (libxc's M06-L `func_aux` is
 //! `XC_LDA_C_PW_MOD`); the [`gtv4`] working term is shared with M06-L exchange.
@@ -55,41 +55,58 @@ use crate::families::XcEval;
 use crate::func::{Family, FunctionalId, FunctionalInfo, Kind};
 use crate::reduced::consts::{FPP_VWN, K_FACTOR_C};
 
+/// The M06-family correlation parameter set (libxc `mgga_c_m06l_params`): the
+/// whole family (M06-L, M06-2X, …) shares one functional form and differs only
+/// in these coefficients (`src/mgga_c_m06l.c` value tables), so the energy
+/// expression below is the single parameterized source for all of them.
+pub(crate) struct M06CParams {
+    pub gamma_ss: f64,
+    pub gamma_ab: f64,
+    pub alpha_ss: f64,
+    pub alpha_ab: f64,
+    pub css: [f64; 5],
+    pub cab: [f64; 5],
+    pub dss: [f64; 6],
+    pub dab: [f64; 6],
+}
+
 // M06-L correlation coefficients (libxc `m06l_values`, `src/mgga_c_m06l.c`).
-const GAMMA_SS: f64 = 0.06;
-const GAMMA_AB: f64 = 0.0031;
-const ALPHA_SS: f64 = 0.00515088;
-const ALPHA_AB: f64 = 0.00304966;
-const CSS: [f64; 5] = [
-    5.349466e-01,
-    5.396620e-01,
-    -3.161217e+01,
-    5.149592e+01,
-    -2.919613e+01,
-];
-const CAB: [f64; 5] = [
-    6.042374e-01,
-    1.776783e+02,
-    -2.513252e+02,
-    7.635173e+01,
-    -1.255699e+01,
-];
-const DSS: [f64; 6] = [
-    4.650534e-01,
-    1.617589e-01,
-    1.833657e-01,
-    4.692100e-04,
-    -4.990573e-03,
-    0.0,
-];
-const DAB: [f64; 6] = [
-    3.957626e-01,
-    -5.614546e-01,
-    1.403963e-02,
-    9.831442e-04,
-    -3.577176e-03,
-    0.0,
-];
+const M06_L_PAR: M06CParams = M06CParams {
+    gamma_ss: 0.06,
+    gamma_ab: 0.0031,
+    alpha_ss: 0.00515088,
+    alpha_ab: 0.00304966,
+    css: [
+        5.349466e-01,
+        5.396620e-01,
+        -3.161217e+01,
+        5.149592e+01,
+        -2.919613e+01,
+    ],
+    cab: [
+        6.042374e-01,
+        1.776783e+02,
+        -2.513252e+02,
+        7.635173e+01,
+        -1.255699e+01,
+    ],
+    dss: [
+        4.650534e-01,
+        1.617589e-01,
+        1.833657e-01,
+        4.692100e-04,
+        -4.990573e-03,
+        0.0,
+    ],
+    dab: [
+        3.957626e-01,
+        -5.614546e-01,
+        1.403963e-02,
+        9.831442e-04,
+        -3.577176e-03,
+        0.0,
+    ],
+};
 /// `params_a_Fermi_D_cnst`: the `Fermi_D_corrected` decay constant (`m06l_values`).
 const FERMI_D_CNST: f64 = 1e-10;
 
@@ -97,7 +114,7 @@ const FERMI_D_CNST: f64 = 1e-10;
 /// the modified parametrization ([`A_MOD`] + [`FPP_VWN`]). The single source of
 /// M06-L's uniform limit; isolated as a named fn so the reuse recovery test can
 /// pin it.
-fn f_pw<N: DualNum<f64> + Copy>(rs: N, z: N, zeta_threshold: f64) -> N {
+pub(crate) fn f_pw<N: DualNum<f64> + Copy>(rs: N, z: N, zeta_threshold: f64) -> N {
     pw92_ec(rs, z, zeta_threshold, &A_MOD, FPP_VWN)
 }
 
@@ -105,7 +122,7 @@ fn f_pw<N: DualNum<f64> + Copy>(rs: N, z: N, zeta_threshold: f64) -> N {
 /// γ·x²/(1 + γ·x²)` (`b97.mpl` `b97_g`), via Horner. Takes the **squared** reduced
 /// gradient `w = x²` directly (sqrt-free): `u = γw/(1 + γw) ∈ [0, 1)` for `w ≥ 0`,
 /// so the polynomial is bounded and smooth.
-fn b97_g<N: DualNum<f64> + Copy>(gamma: f64, c: &[f64; 5], w: N) -> N {
+pub(crate) fn b97_g<N: DualNum<f64> + Copy>(gamma: f64, c: &[f64; 5], w: N) -> N {
     let gw = N::from(gamma) * w;
     let u = gw / (N::from(1.0) + gw);
     let mut p = N::from(c[4]);
@@ -120,7 +137,7 @@ fn b97_g<N: DualNum<f64> + Copy>(gamma: f64, c: &[f64; 5], w: N) -> N {
 /// is cancellation-free at the iso-orbital limit `x²/(8t) → 1`; the harness's FHC
 /// clamp keeps `w ≤ 8t`, so `Fermi_D ∈ [0, 1]` (and is exactly 0 on the clamp
 /// boundary). The `8t` denominator is `> 0` (τ floored to `1e-20`).
-fn fermi_d<N: DualNum<f64> + Copy>(w: N, t: N) -> N {
+pub(crate) fn fermi_d<N: DualNum<f64> + Copy>(w: N, t: N) -> N {
     let eight_t = N::from(8.0) * t;
     (eight_t - w) / eight_t
 }
@@ -135,15 +152,33 @@ fn fermi_d_corrected<N: DualNum<f64> + Copy>(w: N, t: N) -> N {
     fermi_d(w, t) * (-arg.exp_m1())
 }
 
-pub(crate) struct MggaCM06L {
+/// The shared M06-family correlation evaluator: one energy expression, the
+/// parameter set injected per id (M06-L here; M06-2X in
+/// [`super::mgga_c_m06_2x`]).
+pub(crate) struct MggaCM06 {
     info: FunctionalInfo,
     zeta_threshold: f64,
+    par: &'static M06CParams,
 }
 
+impl MggaCM06 {
+    /// Wrap a parameter set + metadata into a boxed evaluator. `zeta_threshold`
+    /// is libxc's default (DBL_EPSILON) for the whole family.
+    pub(crate) fn boxed(info: FunctionalInfo, par: &'static M06CParams) -> Box<dyn XcEval> {
+        Box::new(Mgga(Self {
+            info,
+            zeta_threshold: f64::EPSILON,
+            par,
+        }))
+    }
+}
+
+pub(crate) struct MggaCM06L;
+
 impl MggaCM06L {
-    fn new() -> Self {
-        Self {
-            info: FunctionalInfo {
+    pub(crate) fn boxed() -> Box<dyn XcEval> {
+        MggaCM06::boxed(
+            FunctionalInfo {
                 id: Some(FunctionalId::MggaCM06L),
                 name: "mgga_c_m06_l",
                 family: Family::Mgga,
@@ -154,16 +189,12 @@ impl MggaCM06L {
                 dens_threshold: 1e-12, // libxc mgga_c_m06l threshold
                 hybrid: None,
             },
-            zeta_threshold: f64::EPSILON, // libxc default (DBL_EPSILON)
-        }
-    }
-
-    pub(crate) fn boxed() -> Box<dyn XcEval> {
-        Box::new(Mgga(Self::new()))
+            &M06_L_PAR,
+        )
     }
 }
 
-impl MggaEnergy for MggaCM06L {
+impl MggaEnergy for MggaCM06 {
     fn info(&self) -> &FunctionalInfo {
         &self.info
     }
@@ -205,26 +236,30 @@ impl MggaEnergy for MggaCM06L {
         let perp = f_pw(rs, z, zt) - par_up - par_dn;
 
         // Same-spin channels: stoll_par · (M05 b97·Fermi_corrected + VSXC gtv4·Fermi).
+        let p = self.par;
         let up = if up_screened {
             N::from(0.0)
         } else {
             par_up
-                * (b97_g(GAMMA_SS, &CSS, xs0_sq) * fermi_d_corrected(xs0_sq, t0)
-                    + gtv4(ALPHA_SS, &DSS, xs0_sq, N::from(2.0) * (t0 - k)) * fermi_d(xs0_sq, t0))
+                * (b97_g(p.gamma_ss, &p.css, xs0_sq) * fermi_d_corrected(xs0_sq, t0)
+                    + gtv4(p.alpha_ss, &p.dss, xs0_sq, N::from(2.0) * (t0 - k))
+                        * fermi_d(xs0_sq, t0))
         };
         let dn = if dn_screened {
             N::from(0.0)
         } else {
             par_dn
-                * (b97_g(GAMMA_SS, &CSS, xs1_sq) * fermi_d_corrected(xs1_sq, t1)
-                    + gtv4(ALPHA_SS, &DSS, xs1_sq, N::from(2.0) * (t1 - k)) * fermi_d(xs1_sq, t1))
+                * (b97_g(p.gamma_ss, &p.css, xs1_sq) * fermi_d_corrected(xs1_sq, t1)
+                    + gtv4(p.alpha_ss, &p.dss, xs1_sq, N::from(2.0) * (t1 - k))
+                        * fermi_d(xs1_sq, t1))
         };
 
         // Opposite-spin channel: stoll_perp · (M05 b97_ab + VSXC gtv4_ab), no Fermi
         // factor. b97_g/gtv4 take the combined squared gradient x₀²+x₁² (sqrt-free).
         let w_ab = xs0_sq + xs1_sq;
         let zz_ab = N::from(2.0) * (t0 + t1 - N::from(2.0) * k);
-        let cross = perp * (b97_g(GAMMA_AB, &CAB, w_ab) + gtv4(ALPHA_AB, &DAB, w_ab, zz_ab));
+        let cross =
+            perp * (b97_g(p.gamma_ab, &p.cab, w_ab) + gtv4(p.alpha_ab, &p.dab, w_ab, zz_ab));
 
         up + dn + cross
     }
@@ -241,7 +276,7 @@ mod tests {
         Functional::new(FunctionalId::MggaCM06L, spin).unwrap()
     }
 
-    /// Reuse recovery (CLAUDE.md §2): M06-L correlation's LSDA piece `f_pw` must be
+    /// Reuse recovery (CONTRIBUTING.md reuse rule): M06-L correlation's LSDA piece `f_pw` must be
     /// the **modified** PW92 (`pw92_ec(&A_MOD, FPP_VWN)`, libxc `XC_LDA_C_PW_MOD`),
     /// the same shared uniform limit PBE-C/r2SCAN-c use — *not* a fork and *not* the
     /// standard `lda_c_pw` set. A swap to standard params would shift `f_pw` by

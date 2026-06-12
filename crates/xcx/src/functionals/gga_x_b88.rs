@@ -67,7 +67,7 @@ const G_COEFFS: [f64; 16] = [
 /// at small σ, divergence #4); at/above it use the direct form, where `√t` is far
 /// from 0 and its derivatives are harmless. `g(0) = 0` exactly (the series has no
 /// constant term), so `F_x(σ = 0) = 1` (the LDA limit) is preserved exactly.
-fn b88_g<N: DualNum<f64> + Copy>(t: N) -> N {
+pub(crate) fn b88_g<N: DualNum<f64> + Copy>(t: N) -> N {
     if t.re() < T_SWITCH {
         // Horner on the inner polynomial Σ G[k]·t^k, then ×t to get Σ G[k]·t^(k+1).
         let mut p = N::from(G_COEFFS[G_COEFFS.len() - 1]);

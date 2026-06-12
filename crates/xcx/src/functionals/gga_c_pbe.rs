@@ -29,7 +29,7 @@ use crate::reduced::vars::{mphi, tt_sq};
 // reuses the *same* literals (its `mgamma`/`mbeta` base; reuse rule, no fork).
 // `beta` is the *only* parameter that differs across the PBE-c family — PBEsol-c
 // (`gga_c_pbe_sol`) swaps it to 0.046, γ unchanged — so [`pbe_c_energy`] takes it
-// as an argument rather than the family forking the H math (CLAUDE.md §2/§3).
+// as an argument rather than the family forking the H math (CONTRIBUTING.md reuse rule).
 pub(crate) const BETA: f64 = 0.066_724_550_603_149_22;
 pub(crate) const GAMMA: f64 = 0.031_090_690_869_654_895;
 

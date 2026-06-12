@@ -69,7 +69,7 @@ pub(crate) fn reduced_tau<N: DualNum<f64> + Copy>(tau: N, n: N) -> N {
 /// `t_σ` ([`reduced_tau`]). This is libxc's `tpss_alpha` (util.mpl `K_FACTOR_C`),
 /// the central switch variable of the SCAN/TPSS family.
 ///
-/// **AD-hazard (CLAUDE.md §3, the τ-ratio class).** `α` has 0/0 structure as the
+/// **AD-hazard (the τ-ratio class; docs/api-convention.md §8).** `α` has 0/0 structure as the
 /// density → uniform: at `α ≈ 0` (`τ → τ_W`, the single-orbital / von Weizsäcker
 /// edge) and at `σ → 0` (`τ_W → 0`); the SCAN-family switch functions `f(α)` have
 /// near-singular derivatives at `α ≈ 1`. The form here is cancellation-free in

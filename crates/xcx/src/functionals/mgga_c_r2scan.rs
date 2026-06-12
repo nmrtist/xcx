@@ -16,7 +16,7 @@
 //! regularized denominator (η = 0.001), so it is a smooth rational function of the
 //! reduced variables — no 0/0.
 //!
-//! **Reuse (CLAUDE.md §2/§3).** The uniform limit `ε_c¹ = f_pw + f_H` is built on
+//! **Reuse (CONTRIBUTING.md reuse rule).** The uniform limit `ε_c¹ = f_pw + f_H` is built on
 //! the **shared** [`pw92_ec`] with the *modified* PW92 parametrization
 //! ([`A_MOD`] + [`FPP_VWN`]) — the *same* `f_pw` libxc's r2SCAN uses (both
 //! `lda_c_pw_params` and `lda_c_pw_modified_params` are defined, so modified wins),

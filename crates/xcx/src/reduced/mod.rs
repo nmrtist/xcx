@@ -6,7 +6,7 @@
 //! reduced variables, plus shared math helpers. Everything here is generic over
 //! `num_dual::DualNum` so the same code produces both values and derivatives.
 //!
-//! Provenance: ported-from-libxc (MPL-2.0), `ref/libxc/maple/util.mpl`.
+//! Provenance: ported-from-libxc (MPL-2.0), `maple/util.mpl`.
 
 pub(crate) mod consts;
 pub(crate) mod vars;

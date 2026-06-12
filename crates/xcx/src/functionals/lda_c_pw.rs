@@ -23,7 +23,7 @@ use crate::reduced::vars::f_zeta;
 // standard set (`lda_c_pw`, id 12) and the "modified" set used by PBE-C; only
 // the `a` coefficients and `f''(0)` differ between them. Rows: [paramagnetic
 // ζ=0, ferromagnetic ζ=1, −spin-stiffness]. (`g` parametrizes −α_c; see eq. 8.)
-const A_STD: [f64; 3] = [0.031091, 0.015545, 0.016887];
+pub(crate) const A_STD: [f64; 3] = [0.031091, 0.015545, 0.016887];
 /// Modified `a` set (`lda_c_pw_modified_params`), used by PBE correlation — more
 /// decimal places than [`A_STD`]; paired with the exact `f''(0)` (`FPP_VWN`).
 pub(crate) const A_MOD: [f64; 3] = [0.0310907, 0.01554535, 0.0168869];
@@ -34,7 +34,7 @@ const BETA3: [f64; 3] = [1.6382, 3.3662, 0.88026];
 const BETA4: [f64; 3] = [0.49294, 0.62517, 0.49671];
 /// `f''(0)` for the standard set: the rounded literal libxc's `lda_c_pw` (id 12)
 /// uses. The modified set (PBE-C) passes the exact value `FPP_VWN` instead.
-const FZ20_STD: f64 = 1.709921;
+pub(crate) const FZ20_STD: f64 = 1.709921;
 
 /// PW92 `G(rs)` for parameter row `k` (libxc eq. 10), given the `a` set:
 /// `−2a(1 + α₁ rs)·log1p(1/(2a·(β₁√rs + β₂ rs + β₃ rs^1.5 + β₄ rs²)))`.

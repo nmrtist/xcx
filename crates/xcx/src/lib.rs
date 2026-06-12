@@ -1,18 +1,20 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Copyright (c) 2026 Jiekang Tian and the xcx authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! # xcx — exchange–correlation functionals for DFT (pure-Rust, libxc-compatible)
+//! # xcx — exchange–correlation functionals for DFT in pure Rust
 //!
 //! `xcx` evaluates exchange–correlation (XC) functionals: given a density (and,
 //! depending on the functional, its gradient / kinetic energy density), it
 //! returns the XC energy per particle, its first and second derivatives (`vxc`
 //! and `fxc`), together with metadata (family, requirements, exact-exchange
-//! fraction, range-separation and VV10 parameters).
+//! fraction, range-separation, VV10, and PT2 parameters).
 //!
-//! Each functional is written once as a scalar energy expression; derivatives are
-//! obtained by forward-mode automatic differentiation, so they are correct by
-//! construction. Functional IDs match [libxc](https://libxc.gitlab.io/).
+//! Each functional is written once as a scalar energy expression; all
+//! derivatives are obtained by forward-mode automatic differentiation, so they
+//! are correct by construction. Functional IDs follow
+//! [libxc](https://libxc.gitlab.io/) for drop-in interoperability (verified to
+//! ≤ 1e-10 where the two overlap); functionals unique to xcx — notably the
+//! double-hybrid family — use the xcx-private id namespace (≥ 100000).
 //!
 //! ## Scope fence
 //!
@@ -49,6 +51,7 @@ mod reduced;
 
 pub use error::XcError;
 pub use func::{
-    CamParams, Family, Functional, FunctionalId, FunctionalInfo, HybridInfo, Kind, Spin, Vv10Params,
+    CamParams, DispersionModel, DispersionRec, DoubleHybridParams, Family, Functional,
+    FunctionalId, FunctionalInfo, GridRec, HybridInfo, Kind, Rung, Spin, Vv10Params,
 };
 pub use io::{XcInput, XcResult};

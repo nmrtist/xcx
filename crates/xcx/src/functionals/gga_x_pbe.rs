@@ -26,7 +26,7 @@ use crate::reduced::consts::X2S;
 // `pbe_values` is `{0.8040, MU_PBE}` with `MU_PBE = 0.066…*M_PI*M_PI/3`).
 // `pub(crate)` because the PBE-x family variants (revPBE swaps κ; PBEsol-x swaps
 // μ) and M06-L reuse these exact literals when calling the shared
-// [`pbe_enhancement`] — they parameterize, never fork (CLAUDE.md §2/§3).
+// [`pbe_enhancement`] — they parameterize, never fork (CONTRIBUTING.md reuse rule).
 pub(crate) const KAPPA: f64 = 0.8040;
 pub(crate) const MU: f64 = 0.066_724_550_603_149_22 * PI * PI / 3.0;
 /// `μ·X2S²`: the coefficient of the **squared** reduced gradient `x²` in `κ + μs²`
@@ -62,7 +62,7 @@ pub(crate) const MU_X2S2: f64 = MU * X2S * X2S;
 /// - M06-L's `pbe_f(x)` factor (`maple/mgga_exc/mgga_x_m06l.mpl`, via `$define
 ///   gga_x_pbe_params`) is precisely PBE-x's `pbe_f0` with the same κ/μ.
 ///
-/// All call this single source rather than forking a copy (CLAUDE.md §2/§3 reuse
+/// All call this single source rather than forking a copy (CONTRIBUTING.md reuse
 /// rule; recovery tests in `gga_x_pbe_r` / `gga_x_pbe_sol` / `mgga_x_m06_l` pin the
 /// PBE limiting case `pbe_enhancement(t, KAPPA, MU_X2S2)` to PBE-x's `pbe_f0`).
 /// `mu_x2s2` is the coefficient of the **squared** reduced gradient `x²` in

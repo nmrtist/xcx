@@ -103,6 +103,51 @@ pub(crate) fn b3lyp5() -> Result<Box<dyn XcEval>, XcError> {
     )
 }
 
+// --- Double hybrids (clean-room; absent from libxc — see func.rs id docs) ---
+//
+// xcx emits only the scaled semilocal XC mix; the host adds the EXX fraction
+// (metadata `exx_fraction`) and the PT2 correlation scaled by
+// `double_hybrid()`'s `c_os`/`c_ss` (xcx never evaluates PT2 — scope fence).
+
+/// B2PLYP (Grimme, J. Chem. Phys. 124, 034108 (2006)). Provenance: clean-room.
+/// `E_xc = (1−a_x)·E_x^B88 + a_x·E_x^HF + (1−c)·E_c^LYP + c·E_c^PT2` with
+/// `a_x = 0.53`, `c = 0.27` (paper Eq. 1–2) ⇒ semilocal mix
+/// `0.47·B88-x + 0.73·LYP-c`, EXX 0.53, PT2 `c_os = c_ss = 0.27`. No LDA
+/// exchange component (pure B88 GGA exchange, unlike B3LYP's three-way split).
+pub(crate) fn b2plyp() -> Result<Box<dyn XcEval>, XcError> {
+    const AX: f64 = 0.53;
+    const C: f64 = 0.27;
+    build_mix(
+        &[
+            (1.0 - AX, FunctionalId::GgaXB88),
+            (1.0 - C, FunctionalId::GgaCLyp),
+        ],
+        hyb_info(FunctionalId::HybGgaXcB2plyp, "hyb_gga_xc_b2plyp", AX),
+    )
+}
+
+/// revDSD-PBEP86-D4 semilocal core (Santra, Sylvetsky & Martin, J. Phys.
+/// Chem. A 123, 5129 (2019), Table 4, the D4(EEQ)-paired refit). Provenance:
+/// clean-room. DSD form `E_xc = c_x^HF·E_x^HF + (1−c_x^HF)·E_x^PBE +
+/// c_c·E_c^P86 + c_os·E_os^PT2 + c_ss·E_ss^PT2 + E_disp(D4)` ⇒ semilocal mix
+/// `0.31·PBE-x + 0.4210·P86-c`, EXX 0.69, PT2 `c_os = 0.5922, c_ss = 0.0636`.
+/// The D4 dispersion term is the host's (param_set "revdsd-pbep86").
+pub(crate) fn revdsd_pbep86_d4() -> Result<Box<dyn XcEval>, XcError> {
+    const CX_HF: f64 = 0.69;
+    const CC_P86: f64 = 0.4210;
+    build_mix(
+        &[
+            (1.0 - CX_HF, FunctionalId::GgaXPbe),
+            (CC_P86, FunctionalId::GgaCP86),
+        ],
+        hyb_info(
+            FunctionalId::HybGgaXcRevdsdPbep86D4,
+            "hyb_gga_xc_revdsd_pbep86_d4",
+            CX_HF,
+        ),
+    )
+}
+
 /// The original B3LYP (libxc 402, `hyb_gga_xc_b3lyp`): uses **VWN_RPA**
 /// (`lda_c_vwn_rpa`, id 8) for the LDA correlation — *not* VWN3 and *not* VWN5
 /// (libxc has separate `b3lyp3`/394 and `b3lyp5`/475 for those). This is the

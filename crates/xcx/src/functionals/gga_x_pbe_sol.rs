@@ -14,7 +14,7 @@
 //! `pbe_sol_values = {0.804, MU_GE}`). The rational enhancement `F_x` and the
 //! GGA-exchange skeleton are otherwise identical to
 //! [`gga_x_pbe`](super::gga_x_pbe), so this reuses the shared, sqrt-free
-//! [`pbe_enhancement`] with μ swapped — no forked math (CLAUDE.md §2/§3 reuse rule;
+//! [`pbe_enhancement`] with μ swapped — no forked math (CONTRIBUTING.md reuse rule;
 //! recovery test [`tests::mu_pbe_recovers_pbe_x`]).
 
 use num_dual::DualNum;
@@ -32,7 +32,7 @@ const MU_GE: f64 = 10.0 / 81.0;
 /// in `κ + μs²` (`s = X2S·x`), sqrt-free, with `MU_GE`/`X2S` kept exact.
 const MU_GE_X2S2: f64 = MU_GE * X2S * X2S;
 
-// Compile-time guard for the reuse (CLAUDE.md §2/§3): PBEsol-x restores the smaller
+// Compile-time guard for the reuse (CONTRIBUTING.md reuse rule): PBEsol-x restores the smaller
 // gradient-expansion μ, so its coefficient must sit strictly below PBE's MU_X2S2 —
 // the entire point of the swap. (A would-be edit that equated them fails to compile.)
 const _: () = assert!(MU_GE_X2S2 < super::gga_x_pbe::MU_X2S2);
@@ -90,7 +90,7 @@ mod tests {
         Functional::new(FunctionalId::GgaXPbeSol, spin).unwrap()
     }
 
-    /// Reuse recovery (CLAUDE.md §2/§3): PBEsol-x swaps only μ in the shared
+    /// Reuse recovery (CONTRIBUTING.md reuse rule): PBEsol-x swaps only μ in the shared
     /// [`pbe_enhancement`]. At PBE's μ = `MU_PBE` the shared enhancement must
     /// reproduce PBE-x's `pbe_f0 = 1 + κμs²/(κ + μs²)` exactly (`s = X2S·x`,
     /// `t = x²`), proving the μ parameterization didn't perturb PBE-x; and PBEsol-x

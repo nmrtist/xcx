@@ -74,7 +74,7 @@ pub fn rel_close(a: f64, b: f64, rtol: f64, atol: f64) -> bool {
     (a - b).abs() <= rtol * a.abs().max(b.abs()) + atol
 }
 
-/// Tolerances for the golden comparison (v0.1 definition of done).
+/// Tolerances for the golden comparison.
 pub const RTOL: f64 = 1e-10;
 /// Absolute floor so values screened to exactly zero compare cleanly.
 pub const ATOL: f64 = 1e-12;

@@ -13,7 +13,7 @@
 //! (`pw92_ec(&A_MOD, FPP_VWN)`) are all unchanged (libxc
 //! `pbe_sol_values = {0.046, γ, 1, 1}`). β enters only the gradient correction `H`,
 //! so this reuses the shared [`pbe_c_energy`] with β swapped — no forked math
-//! (CLAUDE.md §2/§3 reuse rule; recovery test [`tests::beta_pbe_recovers_gga_c_pbe`]).
+//! (CONTRIBUTING.md reuse rule; recovery test [`tests::beta_pbe_recovers_gga_c_pbe`]).
 
 use num_dual::DualNum;
 
@@ -26,7 +26,7 @@ use crate::func::{Family, FunctionalId, FunctionalInfo, Kind};
 /// and the modified-PW92 uniform limit are PBE's, shared inside [`pbe_c_energy`].
 const BETA_SOL: f64 = 0.046;
 
-// Compile-time guard for the reuse (CLAUDE.md §2/§3): β is the only constant
+// Compile-time guard for the reuse (CONTRIBUTING.md reuse rule): β is the only constant
 // PBEsol-c swaps, and it lowers β below PBE-c's. (An edit equating them won't compile.)
 const _: () = assert!(BETA_SOL < super::gga_c_pbe::BETA);
 
@@ -81,7 +81,7 @@ mod tests {
         Functional::new(FunctionalId::GgaCPbeSol, spin).unwrap()
     }
 
-    /// Reuse recovery (CLAUDE.md §2/§3): PBEsol-c swaps only β in the shared
+    /// Reuse recovery (CONTRIBUTING.md reuse rule): PBEsol-c swaps only β in the shared
     /// [`pbe_c_energy`]. At PBE's β = `BETA` the shared free function must reproduce
     /// `gga_c_pbe`'s energy per particle exactly (the unpolarized harness returns
     /// `exc = f`), proving the β parameterization didn't perturb PBE-c; and PBEsol-c

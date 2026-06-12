@@ -20,7 +20,7 @@
 //! ([`GgaVars::xs0_sq`](crate::families::gga::GgaVars)) — and `exp` is entire, so
 //! vxc *and* fxc are σ = 0-clean with no special handling, exactly like PBE-x. κ
 //! and μ·X2S² are the very PBE-x literals ([`KAPPA`], [`MU_X2S2`]), reused rather
-//! than re-declared (CLAUDE.md §2/§3); only the enhancement *form* is new.
+//! than re-declared (CONTRIBUTING.md reuse rule); only the enhancement *form* is new.
 
 use num_dual::DualNum;
 

@@ -1,6 +1,5 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Copyright (c) 2026 Jiekang Tian and the xcx authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Second-derivative (`fxc`) correctness gate for the public `xcx` API.
 //!
@@ -35,6 +34,10 @@ const GGA_LIKE: &[FunctionalId] = &[
     FunctionalId::HybGgaXcPbeh,
     FunctionalId::HybGgaXcB3lyp,
     FunctionalId::HybGgaXcB3lyp5,
+    FunctionalId::HybGgaXcWb97xV,
+    FunctionalId::GgaCP86,
+    FunctionalId::HybGgaXcB2plyp,
+    FunctionalId::HybGgaXcRevdsdPbep86D4,
 ];
 
 /// Pure-exchange GGAs: their energy has no σ_ab dependence at all, so every
@@ -64,6 +67,13 @@ const MGGA_ALL: &[FunctionalId] = &[
     FunctionalId::MggaCR2scan,
     FunctionalId::MggaXM06L,
     FunctionalId::MggaCM06L,
+    FunctionalId::HybMggaXM062x,
+    FunctionalId::MggaCM062x,
+    FunctionalId::HybMggaXcPw6b95,
+    FunctionalId::MggaXcB97mV,
+    FunctionalId::HybMggaXcWb97mV,
+    FunctionalId::HybMggaXcPwpb95,
+    FunctionalId::HybMggaXcWb97m2,
 ];
 
 /// Mixed relative/absolute closeness for FD comparisons (central FD on a first
@@ -423,11 +433,21 @@ fn mgga_v2sigma2_stable_into_small_sigma() {
 /// `√σ`-based harness gives ~1e21 at the floor and fails here by ~24 orders. The
 /// golden suite pins the *value* to libxc at σ = 1e-6/1e-8; this pins it (libxc-
 /// free) against its own σ = 1e-4 value, where the AD is unquestionably accurate.
+/// P86 (and the P86-containing revDSD-PBEP86) is excluded: its gradient term
+/// is **odd** in the total reduced gradient (`H ∋ e^(−Φ)`, `Φ ∝ √σ_tot`), so
+/// its true `v2sigma2` diverges `∝ σ^(−1/2)` as σ → 0 — a property of the
+/// published functional (libxc's analytic form does the same), not an AD
+/// artifact. Its small-σ stability is instead covered by the σ^(−1/2)-scaling
+/// test below ([`p86_v2sigma2_follows_sqrt_scaling`]).
 #[test]
 fn v2sigma2_stable_into_small_sigma() {
     let small = [1e-6, 1e-8, 1e-10, 0.0];
+    let p86_like = [FunctionalId::GgaCP86, FunctionalId::HybGgaXcRevdsdPbep86D4];
     // unpolarized: the single v2sigma2 component.
     for &id in GGA_LIKE {
+        if p86_like.contains(&id) {
+            continue;
+        }
         let f = Functional::new(id, Spin::Unpolarized).unwrap();
         let tag = f.info().name;
         for &n in &[0.3, 1.0, 10.0] {
@@ -451,6 +471,9 @@ fn v2sigma2_stable_into_small_sigma() {
     // polarized: the per-spin self-terms aa·aa (idx 0) and bb·bb (idx 5), with
     // σ_aa = σ_bb = s, σ_ab = 0 (drives both per-spin reduced gradients → 0).
     for &id in GGA_LIKE {
+        if p86_like.contains(&id) {
+            continue;
+        }
         let f = Functional::new(id, Spin::Polarized).unwrap();
         let tag = f.info().name;
         for &(na, nb) in &[(0.6, 0.4), (2.0, 1.0)] {
@@ -476,6 +499,30 @@ fn v2sigma2_stable_into_small_sigma() {
                 }
             }
         }
+    }
+}
+
+/// P86's small-σ second derivative: instead of being σ-independent (the
+/// even-in-x_t functionals above), the H-term contribution behaves like
+/// `−(3/4)·k·C/D·σ^(−1/2)·(…)` near σ = 0, so `v2sigma2(σ/100) ≈
+/// 10·v2sigma2(σ)` once the divergent term dominates. Pin that scaling (and
+/// finiteness at the floored σ = 0) libxc-free.
+#[test]
+fn p86_v2sigma2_follows_sqrt_scaling() {
+    let f = Functional::new(FunctionalId::GgaCP86, Spin::Unpolarized).unwrap();
+    for &n in &[0.3, 1.0] {
+        let v = |s: f64| f.eval_fxc(1, &XcInput::gga(&[n], &[s])).unwrap().v2sigma2[0];
+        let (a, b) = (v(1e-6), v(1e-8));
+        // ratio → √(1e-6/1e-8) = 10 as the σ^(-1/2) term dominates
+        assert!(
+            (b / a - 10.0).abs() < 0.5,
+            "n={n}: v2sigma2 σ-scaling {} (want ≈ 10)",
+            b / a
+        );
+        assert!(
+            v(0.0).is_finite(),
+            "v2sigma2 at floored σ = 0 must be finite"
+        );
     }
 }
 

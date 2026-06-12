@@ -18,7 +18,7 @@
 //! reduced variables — no 0/0 — and `f(α)` is a degree-7 polynomial on `α ∈ [0,
 //! 2.5]` with smooth `exp` tails (the rSCAN switch). This removes SCAN's
 //! near-singular `α ≈ 1` switch derivatives; what remains is the **switch-class AD
-//! hazard** (CLAUDE.md §3), handled by keeping every reduced gradient squared and
+//! hazard** (docs/api-convention.md §8), handled by keeping every reduced gradient squared and
 //! using cancellation-free algebraic forms so both vxc and fxc stay accurate.
 //!
 //! **Sqrt-free / AD-safe organization.** The harness seeds the *squared* reduced

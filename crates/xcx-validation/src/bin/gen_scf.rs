@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! SCF end-to-end gate (v0.1.0 DoD §6): turn PySCF full-grid dumps into the
+//! SCF end-to-end gate: turn PySCF full-grid dumps into the
 //! committed SCF artifacts, with **pinned libxc 6.1.0 as the XC truth** (via FFI),
 //! and run both verification layers.
 //!

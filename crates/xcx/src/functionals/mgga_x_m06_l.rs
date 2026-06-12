@@ -20,7 +20,7 @@
 //! 1. **PBE-exchange enhancement × a kinetic series.** `pbe_f(x)` is *exactly*
 //!    PBE-x's enhancement (same κ = 0.804, μ = 0.2195149727645171), so M06-L
 //!    reuses the shared, sqrt-free [`pbe_enhancement`] rather than forking it
-//!    (CLAUDE.md §2; recovery test [`tests::pbe_part_is_shared_pbe_x`]). It is
+//!    (CONTRIBUTING.md reuse rule; recovery test [`tests::pbe_part_is_shared_pbe_x`]). It is
 //!    multiplied by `mgga_series_w(a, 12, t)`, a degree-11 polynomial in the
 //!    bounded kinetic variable `w(t) = (K − t)/(K + t)` (`t = τ_σ/n_σ^(5/3)` the
 //!    reduced kinetic-energy density; `K = K_FACTOR_C`).
@@ -65,14 +65,14 @@ const M06_ALPHA: f64 = 0.00186726;
 /// `t ∈ [0, ∞)` to `w ∈ (−1, 1]`: `w → 1` as `t → 0` (τ-floor edge) and `w → −1`
 /// as `t → ∞`. The denominator `K + t > 0` (`t ≥ 0`), so `w` and its derivatives
 /// are finite everywhere — no pole, no `√`.
-fn mgga_w<N: DualNum<f64> + Copy>(t: N) -> N {
+pub(crate) fn mgga_w<N: DualNum<f64> + Copy>(t: N) -> N {
     (N::from(K_FACTOR_C) - t) / (N::from(K_FACTOR_C) + t)
 }
 
 /// `mgga_series_w(a, 12, t) = Σ_{i=0}^{11} a[i]·mgga_w(t)^i` (`util.mpl`
 /// `mgga_series_w` with `n = 12`), via Horner. A degree-11 polynomial in the
 /// bounded `w(t) ∈ (−1, 1]`, hence smooth and bounded.
-fn mgga_series_w<N: DualNum<f64> + Copy>(a: &[f64; 12], t: N) -> N {
+pub(crate) fn mgga_series_w<N: DualNum<f64> + Copy>(a: &[f64; 12], t: N) -> N {
     let w = mgga_w(t);
     let mut p = N::from(a[11]);
     for &c in a[..11].iter().rev() {
@@ -147,7 +147,7 @@ mod tests {
         Functional::new(FunctionalId::MggaXM06L, spin).unwrap()
     }
 
-    /// Reuse recovery (CLAUDE.md §2): the `pbe_f(x)` factor of M06-L exchange is
+    /// Reuse recovery (CONTRIBUTING.md reuse rule): the `pbe_f(x)` factor of M06-L exchange is
     /// the *shared* PBE-x enhancement (`pbe_enhancement`), not a fork — so it must
     /// equal PBE-x's `pbe_f0 = 1 + κμs²/(κ + μs²)` with M06-L's κ = 0.804,
     /// μ = 0.2195149727645171 (`s = X2S·x`, `w = x²`). If gga_x_pbe ever changed

@@ -13,7 +13,7 @@
 //! are derivatives w.r.t. the floored inputs, as libxc does.
 //!
 //! **Laplacian:** the public `XcInput::lapl` field is accepted but unused — every
-//! v0.2 meta-GGA (TPSS, r2SCAN, M06-L) is `needs_lapl = false`. The reduced
+//! implemented meta-GGA is `needs_lapl = false`. The reduced
 //! Laplacian `u_σ` is therefore not seeded into the AD vector and the `lapl` fxc
 //! blocks (`v2rholapl`, `v2sigmalapl`, `v2lapl2`, `v2lapltau`) are left empty;
 //! both are deferred until a Laplacian-dependent functional is added (at which
@@ -29,8 +29,8 @@ use crate::io::{XcInput, XcResult};
 use crate::reduced::vars;
 
 /// libxc's default `tau_threshold` (`functionals.c`): the floor applied to each
-/// spin kinetic-energy density τ_σ before evaluation. None of the v0.2 functionals
-/// override it.
+/// spin kinetic-energy density τ_σ before evaluation. No implemented functional
+/// overrides it.
 const TAU_THRESHOLD: f64 = 1e-20;
 
 /// Whether to enforce the Fermi-hole-curvature constraint `1 − x_σ²/(8 t_σ) ≥ 0`
@@ -39,7 +39,7 @@ const TAU_THRESHOLD: f64 = 1e-20;
 /// conda-forge libxc 6.1.0 build that the golden snapshots are generated from
 /// (compiled with `XC_ENFORCE_FERMI_HOLE_CURVATURE`; FFI-confirmed: TPSS `exc` at
 /// `σ = 1e-8` equals `exc` at `σ = 8nτ`, i.e. σ is clamped). Per the match-libxc
-/// policy (CLAUDE.md §2) the golden build is the single source of truth, so xcx
+/// policy (docs/api-convention.md §8) the golden build is the single source of truth, so xcx
 /// reproduces this clamp. Like the other `work_mgga` floors/clamps it is applied to
 /// the **seed value**, and AD then differentiates w.r.t. the (clamped) σ slot
 /// without chaining through the `min` — matching libxc's emitted derivatives.
@@ -95,7 +95,7 @@ pub(crate) struct MggaVars<N> {
 /// energy `t_σ`, screened independently on the floored spin density — exactly as
 /// `lda_x`. A functional supplies only `enhancement`, the dimensionless `F_x` as a
 /// function `(x_σ², t_σ) → F`. (The Laplacian argument `u_σ` of libxc's
-/// `mgga_exchange` is omitted: no v0.2 functional uses it.) Provenance:
+/// `mgga_exchange` is omitted: no implemented functional uses it.) Provenance:
 /// ported-from-libxc (MPL-2.0), `maple/util.mpl` `mgga_exchange`.
 pub(crate) fn mgga_exchange<N, F>(
     v: &MggaVars<N>,

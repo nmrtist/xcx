@@ -1,37 +1,69 @@
-xcx — exchange–correlation functionals for density-functional theory (pure-Rust, libxc-compatible)
+xcx — exchange–correlation functionals for density-functional theory in pure Rust
 Copyright (c) 2026 Jiekang Tian and the xcx authors
 
-Licensed under the Mozilla Public License, Version 2.0. The full license text
-is in the accompanying LICENSE file and at https://mozilla.org/MPL/2.0/.
-
 ==============================================================================
-Attribution and provenance
+Licensing scheme
 ==============================================================================
 
-Portions of this library are derived from libxc — in particular the functional
-formulas, the reduced-variable helper layer, and several numerical-stability
-reformulations:
+xcx is licensed per file, under one of two schemes. Every Rust source file
+carries an SPDX header (and, for functional code, a `Provenance:` tag) stating
+which applies:
+
+1.  Original xcx code — the public API and data-layout layer, the automatic-
+    differentiation family harnesses, the test suites, and every functional
+    tagged `Provenance: clean-room` (implemented from the published
+    literature, without reference to the libxc source) — is dual-licensed
+    under either of
+
+        * the MIT License (LICENSE-MIT), or
+        * the Apache License, Version 2.0 (LICENSE-APACHE),
+
+    at your option. Header: `SPDX-License-Identifier: MIT OR Apache-2.0`.
+
+2.  Code tagged `Provenance: ported-from-libxc` — functional formulas,
+    the reduced-variable helper layer, and numerical-stability
+    reformulations derived from libxc's Maple/C sources — remains under the
+    Mozilla Public License, Version 2.0 (LICENSE-MPL), the license of the
+    upstream work. Files of mixed provenance also stay under the MPL-2.0.
+
+The combined SPDX expression for the crate as a whole is therefore
+`(MIT OR Apache-2.0) AND MPL-2.0`. Because MPL-2.0 is file-level copyleft,
+this has no practical effect on downstream users: you may depend on xcx from
+MIT, Apache, BSD, or proprietary projects freely; only modifications to the
+MPL-tagged source files themselves must remain available under the MPL.
+
+==============================================================================
+Upstream attribution
+==============================================================================
+
+Portions of this library are derived from libxc:
 
     libxc — https://libxc.gitlab.io/
     Copyright (C) the libxc authors, including M. A. L. Marques, X. Andrade,
     S. Lehtola, and M. Oliveira.
     Licensed under the Mozilla Public License, Version 2.0.
 
-The derived portions remain under the Mozilla Public License, Version 2.0 —
-the same license under which the entire xcx crate is distributed.
-
-------------------------------------------------------------------------------
+==============================================================================
 Per-file provenance
-------------------------------------------------------------------------------
+==============================================================================
 
 Every functional source file carries one of the following tags in its header:
 
     Provenance: ported-from-libxc
-        Derived from the corresponding libxc Maple/C source.
+        Derived from the corresponding libxc Maple/C source. MPL-2.0.
 
     Provenance: clean-room
         Implemented from the published literature, without reference to the
-        libxc source.
+        libxc source. MIT OR Apache-2.0.
 
-See the individual file headers to determine the origin of any given
-functional.
+See the individual file headers (SPDX identifier + provenance tag) to
+determine the licensing of any given file.
+
+==============================================================================
+Contributions
+==============================================================================
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in xcx by you shall be licensed per the scheme above
+(MIT OR Apache-2.0 for original code; MPL-2.0 for code derived from libxc),
+without any additional terms or conditions.

@@ -48,7 +48,7 @@ const X2S4: f64 = X2S2 * X2S2;
 /// `qb = 9/20·(α−1)/√(1 + b·α(α−1)) + 2p/3`. The exponent `z^ff` is `z²`
 /// (`ff = BLOC_a = 2` for TPSS, `BLOC_b = 0`).
 ///
-/// **AD-safe factoring (CLAUDE.md §3 — the τ-ratio class).** The maple's
+/// **AD-safe factoring (the τ-ratio hazard class; docs/api-convention.md §8).** The maple's
 /// `√(½(9/25 z² + p²))` is a √ whose argument → 0 as `w → 0` (`z, p ∝ w`), so its
 /// forward-AD second derivative would diverge `~ w^(−3/2)` — the same trap as the
 /// √σ form (divergence #4). Both `z²` and `p²` carry a factor `w²`, so the term is

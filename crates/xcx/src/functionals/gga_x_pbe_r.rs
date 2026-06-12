@@ -13,7 +13,7 @@
 //! μ = `MU_PBE` is unchanged (libxc `pbe_r_values = {1.245, MU_PBE}`). The rational
 //! enhancement `F_x` and the entire GGA-exchange skeleton are otherwise identical
 //! to [`gga_x_pbe`](super::gga_x_pbe), so this reuses the shared, sqrt-free
-//! [`pbe_enhancement`] with κ swapped — no forked math (CLAUDE.md §2/§3 reuse rule;
+//! [`pbe_enhancement`] with κ swapped — no forked math (CONTRIBUTING.md reuse rule;
 //! recovery test [`tests::kappa_804_recovers_pbe_x`]).
 
 use num_dual::DualNum;
@@ -80,7 +80,7 @@ mod tests {
         Functional::new(FunctionalId::GgaXPbeR, spin).unwrap()
     }
 
-    /// Reuse recovery (CLAUDE.md §2/§3): revPBE swaps only κ in the shared
+    /// Reuse recovery (CONTRIBUTING.md reuse rule): revPBE swaps only κ in the shared
     /// [`pbe_enhancement`]. At PBE's κ = 0.8040 the shared enhancement must
     /// reproduce PBE-x's `pbe_f0 = 1 + κμs²/(κ + μs²)` exactly (`s = X2S·x`,
     /// `t = x²`), proving the κ parameterization didn't perturb PBE-x; and revPBE

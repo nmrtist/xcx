@@ -5,7 +5,10 @@ members = ["crates/xcx", "crates/xcx-validation"]
 [workspace.package]
 edition = "2021"
 rust-version = "1.87"
-license = "MPL-2.0"
+# Compound license: original xcx code (API layer, AD harnesses, clean-room
+# functionals) is MIT OR Apache-2.0; files ported from libxc remain MPL-2.0.
+# See NOTICE for the per-file rules.
+license = "(MIT OR Apache-2.0) AND MPL-2.0"
 authors = ["Jiekang Tian"]
 repository = "https://github.com/nmrtist/xcx"
 homepage = "https://github.com/nmrtist/xcx"
@@ -14,6 +17,8 @@ homepage = "https://github.com/nmrtist/xcx"
 # Forward-mode automatic differentiation (pure Rust, MIT OR Apache-2.0).
 num-dual = "0.13"
 nalgebra = "0.34"
+# erf for the range-separated short-range exchange kernel (pure Rust, MIT OR Apache-2.0).
+libm = "0.2"
 # Dev / test only.
 approx = "0.5"
 rand = "0.8"

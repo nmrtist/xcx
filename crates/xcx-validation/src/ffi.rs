@@ -29,6 +29,9 @@ type FnGga = unsafe extern "C" fn(
     *mut f64,
 );
 type FnNumber = unsafe extern "C" fn(*const c_char) -> c_int;
+// xc_func_set_ext_params(p, ext_params): override a functional's external
+// parameters (e.g. mPW91 {bt, alpha, expo}, BC95 {css, copp}).
+type FnSetExt = unsafe extern "C" fn(*mut c_void, *const f64);
 type FnVersion = unsafe extern "C" fn(*mut c_int, *mut c_int, *mut c_int);
 // mGGA entry points (lapl + tau in, lapl + tau derivatives out):
 //   xc_mgga_exc_vxc(p, np, rho, sigma, lapl, tau, zk, vrho, vsigma, vlapl, vtau)
@@ -139,6 +142,209 @@ impl Libxc {
         let c = CString::new(name).unwrap();
         let f: Symbol<FnNumber> = self.sym(b"xc_functional_get_number\0");
         unsafe { f(c.as_ptr()) }
+    }
+
+    /// Run `body` against an initialized functional, optionally overriding its
+    /// external parameters first (`xc_func_set_ext_params`). Shared
+    /// alloc/init/end/free plumbing for the `*_ext` evaluators below.
+    fn with_func<R>(
+        &self,
+        id: i32,
+        nspin: i32,
+        ext: Option<&[f64]>,
+        body: impl FnOnce(*const c_void) -> R,
+    ) -> R {
+        let alloc: Symbol<FnAlloc> = self.sym(b"xc_func_alloc\0");
+        let init: Symbol<FnInit> = self.sym(b"xc_func_init\0");
+        let end: Symbol<FnEnd> = self.sym(b"xc_func_end\0");
+        let free: Symbol<FnFree> = self.sym(b"xc_func_free\0");
+        unsafe {
+            let p = alloc();
+            assert!(!p.is_null(), "xc_func_alloc returned null");
+            assert_eq!(init(p, id, nspin), 0, "xc_func_init({id},{nspin}) failed");
+            if let Some(params) = ext {
+                let set: Symbol<FnSetExt> = self.sym(b"xc_func_set_ext_params\0");
+                set(p, params.as_ptr());
+            }
+            let r = body(p);
+            end(p);
+            free(p);
+            r
+        }
+    }
+
+    /// [`gga_exc_vxc`](Self::gga_exc_vxc) with external-parameter override.
+    pub fn gga_exc_vxc_ext(
+        &self,
+        id: i32,
+        nspin: i32,
+        np: usize,
+        rho: &[f64],
+        sigma: &[f64],
+        ext: Option<&[f64]>,
+    ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let eval: Symbol<FnGga> = self.sym(b"xc_gga_exc_vxc\0");
+        let ns = nspin as usize;
+        let nsig = 2 * ns - 1;
+        assert_eq!(rho.len(), np * ns, "rho length");
+        assert_eq!(sigma.len(), np * nsig, "sigma length");
+        let mut zk = vec![0.0; np];
+        let mut vrho = vec![0.0; np * ns];
+        let mut vsigma = vec![0.0; np * nsig];
+        self.with_func(id, nspin, ext, |p| unsafe {
+            eval(
+                p,
+                np,
+                rho.as_ptr(),
+                sigma.as_ptr(),
+                zk.as_mut_ptr(),
+                vrho.as_mut_ptr(),
+                vsigma.as_mut_ptr(),
+            );
+        });
+        (zk, vrho, vsigma)
+    }
+
+    /// [`gga_fxc`](Self::gga_fxc) with external-parameter override.
+    pub fn gga_fxc_ext(
+        &self,
+        id: i32,
+        nspin: i32,
+        np: usize,
+        rho: &[f64],
+        sigma: &[f64],
+        ext: Option<&[f64]>,
+    ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let eval: Symbol<FnGgaFxc> = self.sym(b"xc_gga_fxc\0");
+        let ns = nspin as usize;
+        let nsig = 2 * ns - 1;
+        let n_rr = ns * (ns + 1) / 2;
+        let n_rs = ns * nsig;
+        let n_ss = nsig * (nsig + 1) / 2;
+        assert_eq!(rho.len(), np * ns, "rho length");
+        assert_eq!(sigma.len(), np * nsig, "sigma length");
+        let mut v2rho2 = vec![0.0; np * n_rr];
+        let mut v2rhosigma = vec![0.0; np * n_rs];
+        let mut v2sigma2 = vec![0.0; np * n_ss];
+        self.with_func(id, nspin, ext, |p| unsafe {
+            eval(
+                p,
+                np,
+                rho.as_ptr(),
+                sigma.as_ptr(),
+                v2rho2.as_mut_ptr(),
+                v2rhosigma.as_mut_ptr(),
+                v2sigma2.as_mut_ptr(),
+            );
+        });
+        (v2rho2, v2rhosigma, v2sigma2)
+    }
+
+    /// [`mgga_exc_vxc`](Self::mgga_exc_vxc) with external-parameter override.
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    pub fn mgga_exc_vxc_ext(
+        &self,
+        id: i32,
+        nspin: i32,
+        np: usize,
+        rho: &[f64],
+        sigma: &[f64],
+        lapl: &[f64],
+        tau: &[f64],
+        ext: Option<&[f64]>,
+    ) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let eval: Symbol<FnMgga> = self.sym(b"xc_mgga_exc_vxc\0");
+        let ns = nspin as usize;
+        let nsig = 2 * ns - 1;
+        assert_eq!(rho.len(), np * ns, "rho length");
+        assert_eq!(sigma.len(), np * nsig, "sigma length");
+        assert_eq!(lapl.len(), np * ns, "lapl length");
+        assert_eq!(tau.len(), np * ns, "tau length");
+        let mut zk = vec![0.0; np];
+        let mut vrho = vec![0.0; np * ns];
+        let mut vsigma = vec![0.0; np * nsig];
+        let mut vlapl = vec![0.0; np * ns];
+        let mut vtau = vec![0.0; np * ns];
+        self.with_func(id, nspin, ext, |p| unsafe {
+            eval(
+                p,
+                np,
+                rho.as_ptr(),
+                sigma.as_ptr(),
+                lapl.as_ptr(),
+                tau.as_ptr(),
+                zk.as_mut_ptr(),
+                vrho.as_mut_ptr(),
+                vsigma.as_mut_ptr(),
+                vlapl.as_mut_ptr(),
+                vtau.as_mut_ptr(),
+            );
+        });
+        (zk, vrho, vsigma, vlapl, vtau)
+    }
+
+    /// [`mgga_fxc`](Self::mgga_fxc) with external-parameter override, returning
+    /// the six non-Laplacian blocks.
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    pub fn mgga_fxc_ext(
+        &self,
+        id: i32,
+        nspin: i32,
+        np: usize,
+        rho: &[f64],
+        sigma: &[f64],
+        lapl: &[f64],
+        tau: &[f64],
+        ext: Option<&[f64]>,
+    ) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let eval: Symbol<FnMggaFxc> = self.sym(b"xc_mgga_fxc\0");
+        let ns = nspin as usize;
+        let nsig = 2 * ns - 1;
+        let n_rr = ns * (ns + 1) / 2;
+        let n_rs = ns * nsig;
+        let n_rl = ns * ns;
+        let n_rt = ns * ns;
+        let n_ss = nsig * (nsig + 1) / 2;
+        let n_sl = nsig * ns;
+        let n_st = nsig * ns;
+        let n_ll = ns * (ns + 1) / 2;
+        let n_lt = ns * ns;
+        let n_tt = ns * (ns + 1) / 2;
+        assert_eq!(rho.len(), np * ns, "rho length");
+        assert_eq!(sigma.len(), np * nsig, "sigma length");
+        assert_eq!(lapl.len(), np * ns, "lapl length");
+        assert_eq!(tau.len(), np * ns, "tau length");
+        let mut v2rho2 = vec![0.0; np * n_rr];
+        let mut v2rhosigma = vec![0.0; np * n_rs];
+        let mut v2rholapl = vec![0.0; np * n_rl];
+        let mut v2rhotau = vec![0.0; np * n_rt];
+        let mut v2sigma2 = vec![0.0; np * n_ss];
+        let mut v2sigmalapl = vec![0.0; np * n_sl];
+        let mut v2sigmatau = vec![0.0; np * n_st];
+        let mut v2lapl2 = vec![0.0; np * n_ll];
+        let mut v2lapltau = vec![0.0; np * n_lt];
+        let mut v2tau2 = vec![0.0; np * n_tt];
+        self.with_func(id, nspin, ext, |p| unsafe {
+            eval(
+                p,
+                np,
+                rho.as_ptr(),
+                sigma.as_ptr(),
+                lapl.as_ptr(),
+                tau.as_ptr(),
+                v2rho2.as_mut_ptr(),
+                v2rhosigma.as_mut_ptr(),
+                v2rholapl.as_mut_ptr(),
+                v2rhotau.as_mut_ptr(),
+                v2sigma2.as_mut_ptr(),
+                v2sigmalapl.as_mut_ptr(),
+                v2sigmatau.as_mut_ptr(),
+                v2lapl2.as_mut_ptr(),
+                v2lapltau.as_mut_ptr(),
+                v2tau2.as_mut_ptr(),
+            );
+        });
+        (v2rho2, v2rhosigma, v2sigma2, v2rhotau, v2sigmatau, v2tau2)
     }
 
     /// Evaluate an LDA functional, returning `(zk, vrho)`.

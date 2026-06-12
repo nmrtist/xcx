@@ -201,12 +201,88 @@ pub enum XcError {                  // #[non_exhaustive]
   corresponding `XcInput` field is `None`.
 - `exx_fraction`: the global fraction of exact (Hartree–Fock) exchange the host
   must add. Pure semilocal functionals report `0.0`.
-- `cam`: present only for range-separated functionals (none in v0.1); when
-  present the host builds short/long-range exact exchange from ω/α/β.
-- `vv10`: present only for VV10-containing functionals (none in v0.1); xcx never
-  computes the nonlocal integral.
+- `cam`: present only for range-separated functionals (ωB97X-V, ωB97M-V); when
+  present the host builds short/long-range exact exchange from ω/α/β in the
+  frozen convention `EXX(r12) = alpha + beta*erf(omega*r12)` (so α is the
+  global/short-range fraction — also reported by `exx_fraction` — and α + β
+  the long-range limit). xcx evaluates only the SR-attenuated semilocal
+  exchange of these functionals.
+- `vv10`: present only for VV10-containing functionals (B97M-V, ωB97X-V,
+  ωB97M-V, all `{ b: 6.0, c: 0.01 }`); xcx never computes the nonlocal
+  integral. B97M-V is otherwise pure (exx 0, no CAM): its `hybrid` record
+  exists solely to carry the VV10 parameters and it still reports the
+  `MetaGga` rung.
 - IDs and names equal libxc's (`xc_funcs.h`); verified against
-  `xc_functional_get_number` in the cross-check harness.
+  `xc_functional_get_number` in the cross-check harness. Functionals that do
+  not exist in libxc (the double hybrids) use the xcx-private id namespace
+  `>= 100000` — see "Functional-id namespace" below.
+
+### Metadata v2 (host-selection accessors on `FunctionalInfo`)
+
+Additive accessors for downstream functional selection (frozen signatures):
+
+```rust
+pub enum Rung { Lda, Gga, MetaGga, Hybrid, RangeSeparatedHybrid, DoubleHybrid }
+pub enum DispersionModel { D3Bj, D4, Vv10, None }
+pub struct DispersionRec { pub model: DispersionModel, pub param_set: &'static str }
+pub struct GridRec { pub level: u8, pub grid_sensitive: bool }   // level 0..=4
+pub struct DoubleHybridParams { pub c_os: f64, pub c_ss: f64 }
+impl FunctionalInfo {
+    pub fn rung(&self) -> Rung;
+    pub fn dispersion(&self) -> Option<DispersionRec>;
+    pub fn grid(&self) -> GridRec;
+    pub fn double_hybrid(&self) -> Option<DoubleHybridParams>;
+}
+```
+
+- `rung()`: a registered functional carrying PT2 coefficients
+  (`double_hybrid()` is `Some`) is `DoubleHybrid` — even when range-separated
+  (ωB97M(2)): the rung reports the highest treatment the host must provide.
+  Otherwise derived from `Family` + `hybrid` — a hybrid with `cam` present is
+  `RangeSeparatedHybrid` (CAM convention, frozen: `EXX(r12) = alpha + beta*erf(omega*r12)`),
+  any other hybrid with nonzero exact exchange (or a Hyb* family) is `Hybrid`,
+  pure families map to their semilocal rung — including B97M-V, whose
+  `hybrid` record carries only VV10 (exx 0, no CAM ⇒ `MetaGga`).
+- `dispersion()`: the VV10-containing B97M-V/ωB97X-V/ωB97M-V/ωB97M(2) report
+  `DispersionModel::Vv10` with `param_set` = the canonical functional name
+  (the `b`/`C` values live in `hybrid.vv10`; for ωB97M(2) the host scales the
+  VV10 energy by `c_VV10 = 1 − c_PT2`). Functionals with a **published
+  D4 parameter set** (the dftd4 reference table; Caldeweyher et al., JCP 150,
+  154122 (2019)) report `DispersionModel::D4` with `param_set` = the
+  **dftd4-convention key** (lowercase, e.g. `"b3lyp"`, `"pbe0"`, `"r2scan"`,
+  `"b2plyp"`, `"revdsdpbep86"`, `"pwpb95"`) that the host resolves against its
+  own dftd4 damping-parameter table — xcx ships no dispersion data or code
+  (scope fence). Component ids map to the canonical functional their name
+  denotes (`mgga_x_r2scan` → `"r2scan"`, `gga_x_pbe_r` → `"revpbe"`, …);
+  ambiguous components (B88, LYP, P86) and functionals without a published D4
+  set (LDAs, M06-2X) return `None`. The D3(BJ)-vs-D4 *choice*
+  remains host policy; this is a recommendation.
+- `grid()`: level 3 / not grid-sensitive for standard LDA/GGA/meta-GGA/hybrids;
+  level 4 / `grid_sensitive: true` for the Minnesota M06 family (M06-L and
+  M06-2X exchange + correlation), whose documented grid sensitivity (Wheeler &
+  Houk, JCTC 2010, 6, 395; Mardirossian & Head-Gordon, Mol. Phys. 2017, 115,
+  2315) warrants finer quadrature, and for the combinatorially-optimized
+  B97M-V/ωB97X-V/ωB97M-V, whose B97/Minnesota-class inhomogeneity expansions
+  are likewise documented as grid-sensitive (Mardirossian & Head-Gordon,
+  J. Chem. Theory Comput. 2016, 12, 4303; Mol. Phys. 2017, 115, 2315).
+- `double_hybrid()`: `Some(DoubleHybridParams { c_os, c_ss })` for the four
+  registered double hybrids — the published PT2 coefficients the host applies
+  to its own PT2/MP2-like correlation energy (xcx never evaluates PT2):
+  B2PLYP `0.27/0.27`, revDSD-PBEP86-D4 `0.5922/0.0636`, PWPB95 `0.269/0.0`
+  (SOS-PT2), ωB97M(2) `0.34096/0.34096` (a single canonical-MP2 coefficient
+  `c_PT2`; its retained VV10 partner is scaled by `c_VV10 = 1 − c_PT2 =
+  0.65904`, the paper's constraint). xcx emits the *scaled semilocal mix* of a
+  double hybrid (e.g. B2PLYP = `0.47·B88-x + 0.73·LYP-c`); the host adds EXX
+  (and CAM for ωB97M(2)) plus the scaled PT2. `None` for everything else.
+
+### Functional-id namespace for non-libxc functionals
+
+`FunctionalId::as_u32` equals the libxc numeric id **except** for functionals
+absent from libxc (no libxc release ships double hybrids): those use the
+xcx-private namespace `>= 100000` (far above libxc's range, currently < 1000):
+B2PLYP 100001, revDSD-PBEP86-D4 100002, PWPB95 100003, ωB97M(2) 100004. Names
+keep the libxc convention (`hyb_gga_xc_b2plyp`, …), so `from_name` stays
+forward-compatible should libxc ever add them.
 
 ## 6. Linear mixing
 
@@ -295,6 +371,23 @@ completeness; **none affects a physically-meaningful calculation**:
   stays finite (xcx floors the mathematically-nonnegative total gradient at 0),
   the opposite-direction robustness asymmetry to (C). No physical calculation is
   affected; inside the domain the two agree to ≤ 1e-10.
+
+- **(B/D) B97-family floored-edge / low-density first derivatives.**
+  The B97 power-series functionals use the *raw* per-spin reduced variables
+  `x_σ² = σ_σσ/n_σ^(8/3)` and `t_σ = τ_σ/n_σ^(5/3)` (the M06-family form), so the
+  same two artifact classes apply: at **exact full spin polarization** the
+  floored minority-channel first derivatives are analytic-vs-AD f64 noise
+  amplified by the floor (`hyb_gga_xc_wb97x_v` rel ~1e-4 on vrho/vsigma;
+  `mgga_xc_b97m_v` additionally evaluates the opposite-spin kinetic variable
+  `w_os` in a symmetric, cancellation-free regrouping — algebraically identical
+  to libxc's form, which piles up `2K²` before cancelling — giving vtau_b
+  rel ~0.15 at the τ-floor corner), and at **extreme low density**
+  (`mgga_xc_b97m_v` n < 1e-8, `hyb_gga_xc_wb97x_v` n < 1e-12) vsigma crosses
+  1e-10 (divergence-D class). The energy matches everywhere; the golden vxc set
+  drops only those non-physical edge points (the physical near-full-polarization
+  point `(1.0, 1e-4)` stays pinned ≤ 1e-10), and `hyb_mgga_xc_wb97m_v`
+  (threshold 1e-13) matches at *every* point, including the exact edges, and is
+  fully pinned. Fuzz still covers finiteness for all three at the edges.
 
 - **Fermi-hole-curvature (FHC) clamp is build-conditional in libxc.** libxc's
   meta-GGA harness applies the constraint `sigma_σσ ← min(sigma_σσ, 8·n_σ·τ_σ)`

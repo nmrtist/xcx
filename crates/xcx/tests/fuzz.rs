@@ -1,6 +1,5 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Copyright (c) 2026 Jiekang Tian and the xcx authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Finiteness / fuzz gate for the public `xcx` API (contract: docs/api-convention.md §4).
 //!
@@ -409,7 +408,7 @@ const K_FACTOR_C: f64 = 4.557_799_872_345_596;
 /// τ candidates for an unpolarized meta-GGA point (n, σ): the τ floor, the
 /// von-Weizsäcker edge τ_W = σ/(8n) (α ≈ 0, the τ = τ_W hazard), the iso-orbital
 /// point τ_W + τ_unif (α ≈ 1), a large-α value, and an absolute-large τ — the
-/// τ-ratio hazard class (CLAUDE.md §3). The harness floors τ to 1e-20 and the FHC
+/// τ-ratio hazard class (docs/api-convention.md §8). The harness floors τ to 1e-20 and the FHC
 /// clamp keeps σ ≤ 8nτ, so every value yields finite outputs.
 fn unpol_taus(n: f64, sigma: f64) -> Vec<(f64, &'static str)> {
     let nn = n.max(1e-300);
@@ -513,7 +512,7 @@ fn fuzz_all_functionals_finite() {
 
     for &id in FunctionalId::ALL {
         for &spin in &[Spin::Unpolarized, Spin::Polarized] {
-            let f = Functional::new(id, spin).expect("v0.1 functional must build");
+            let f = Functional::new(id, spin).expect("registered functional must build");
             let needs_sigma = f.info().needs_sigma;
             let needs_tau = f.info().needs_tau;
 
@@ -635,7 +634,7 @@ fn fuzz_all_functionals_finite() {
                         }
                     }
                 }
-                // `Spin` is #[non_exhaustive]; no other variant exists in v0.1.
+                // `Spin` is #[non_exhaustive]; no other variant exists today.
                 _ => unreachable!("unknown Spin variant"),
             }
         }

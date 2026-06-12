@@ -1,19 +1,22 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Copyright (c) 2026 Jiekang Tian and the xcx authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Concrete functional registry.
 //!
 //! The public contract (types + metadata, see `docs/api-convention.md`) is
-//! frozen before any functional math is written. Functionals land in subsequent
-//! steps; each file will be tagged with its provenance
-//! (`Provenance: ported-from-libxc` / `Provenance: clean-room`).
+//! frozen before any functional math is written. Each functional file is
+//! tagged with its provenance, which also determines its license (see
+//! `NOTICE`): `Provenance: ported-from-libxc` (MPL-2.0) or
+//! `Provenance: clean-room` (implemented from the published literature;
+//! MIT OR Apache-2.0).
 
 use crate::error::XcError;
 use crate::families::XcEval;
 use crate::func::FunctionalId;
 
+mod attenuation;
 mod gga_c_lyp;
+mod gga_c_p86;
 mod gga_c_pbe;
 mod gga_c_pbe_sol;
 mod gga_x_b88;
@@ -21,22 +24,30 @@ mod gga_x_pbe;
 mod gga_x_pbe_r;
 mod gga_x_pbe_sol;
 mod gga_x_rpbe;
+mod hyb_gga_xc_wb97x_v;
+mod hyb_mgga_x_m06_2x;
+mod hyb_mgga_xc_pw6b95;
+mod hyb_mgga_xc_pwpb95;
+mod hyb_mgga_xc_wb97m_2;
+mod hyb_mgga_xc_wb97m_v;
 mod hybrids;
 mod lda_c_pw;
 mod lda_c_vwn;
 mod lda_c_vwn_3;
 mod lda_c_vwn_rpa;
 mod lda_x;
+mod mgga_c_m06_2x;
 mod mgga_c_m06_l;
 mod mgga_c_r2scan;
 mod mgga_c_tpss;
 mod mgga_x_m06_l;
 mod mgga_x_r2scan;
 mod mgga_x_tpss;
+mod mgga_xc_b97mv;
 
-/// Build the boxed evaluator for a functional id. The full v0.1 set is
-/// implemented, so this matches every [`FunctionalId`] variant explicitly (no
-/// catch-all): adding a future variant deliberately fails to compile here until
+/// Build the boxed evaluator for a functional id. Every [`FunctionalId`]
+/// variant is matched explicitly (no catch-all): adding a future variant
+/// deliberately fails to compile here until
 /// it is wired up or routed to [`XcError::NotImplemented`].
 pub(crate) fn build(id: FunctionalId) -> Result<Box<dyn XcEval>, XcError> {
     use FunctionalId::*;
@@ -63,5 +74,16 @@ pub(crate) fn build(id: FunctionalId) -> Result<Box<dyn XcEval>, XcError> {
         HybGgaXcPbeh => hybrids::pbeh(),
         HybGgaXcB3lyp5 => hybrids::b3lyp5(),
         HybGgaXcB3lyp => hybrids::b3lyp(),
+        HybMggaXM062x => Ok(hyb_mgga_x_m06_2x::HybMggaXM062x::boxed()),
+        MggaCM062x => Ok(mgga_c_m06_2x::MggaCM062x::boxed()),
+        HybMggaXcPw6b95 => hyb_mgga_xc_pw6b95::pw6b95(),
+        MggaXcB97mV => Ok(mgga_xc_b97mv::MggaXcB97mV::boxed()),
+        HybGgaXcWb97xV => Ok(hyb_gga_xc_wb97x_v::HybGgaXcWb97xV::boxed()),
+        HybMggaXcWb97mV => Ok(hyb_mgga_xc_wb97m_v::HybMggaXcWb97mV::boxed()),
+        GgaCP86 => Ok(gga_c_p86::GgaCP86::boxed()),
+        HybGgaXcB2plyp => hybrids::b2plyp(),
+        HybGgaXcRevdsdPbep86D4 => hybrids::revdsd_pbep86_d4(),
+        HybMggaXcPwpb95 => hyb_mgga_xc_pwpb95::pwpb95(),
+        HybMggaXcWb97m2 => Ok(hyb_mgga_xc_wb97m_2::HybMggaXcWb97m2::boxed()),
     }
 }
