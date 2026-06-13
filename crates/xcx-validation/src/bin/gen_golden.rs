@@ -74,6 +74,7 @@ fn main() {
         ("hyb_gga_xc_wb97x_v", 1),
         ("hyb_mgga_xc_wb97m_v", 2),
         ("gga_c_p86", 1),
+        ("gga_xc_b97_3c", 1),
     ];
     for &(name, family) in functionals {
         if !want(name) {
@@ -142,6 +143,39 @@ fn main() {
                 (1.0 - 0.269, "mgga_c_bc95", MixExt::Mgga(par_c)),
             ],
         );
+    }
+    // PBEh-3c (Grimme et al. 2015) semilocal core: libxc 6.1.0 ships B97-3c but
+    // not PBEh-3c, so the snapshot is a libxc *component mix* through
+    // `xc_func_set_ext_params`: 0.58·gga_x_pbe{_kappa = 1.0245, _mu = 10/81}
+    // + 1.0·gga_c_pbe{_beta = 0.03, _gamma/_B/_tscale at defaults}. PBE family
+    // ⇒ exact-σ=0 fxc pinnable.
+    if want("hyb_gga_xc_pbeh_3c") {
+        gen_gga_mix(
+            &xc,
+            &version,
+            &outdir,
+            "hyb_gga_xc_pbeh_3c",
+            100_005,
+            &[
+                (0.58, "gga_x_pbe", Some(&[1.0245, 10.0 / 81.0])),
+                (
+                    1.0,
+                    "gga_c_pbe",
+                    Some(&[0.03, 0.031090690869654895034, 1.0, 1.0]),
+                ),
+            ],
+            true,
+        );
+    }
+    // Constructor cross-check corpus (testdata/constructor/, loaded by
+    // tests/constructor.rs rather than the by-name golden test): the
+    // *semilocal part* of libxc's original B97 (hyb_gga_xc_b97, id 407),
+    // pinned against the public `Functional::b97_xc` series constructor fed
+    // Becke's original coefficients.
+    if want("hyb_gga_xc_b97") {
+        let cdir = outdir.join("constructor");
+        std::fs::create_dir_all(&cdir).unwrap();
+        gen_gga(&xc, &version, &cdir, "hyb_gga_xc_b97", true);
     }
 }
 
@@ -468,9 +502,17 @@ fn gen_gga(
     // (1.0, 1e-4) point match ≤ 1e-10 and stay pinned). Its extreme-low-density
     // point (n ≈ 1.1e-13) hits the divergence-D class on vsigma (rel ~5e-9,
     // PW6B95-precedent), so it is floored like `mgga_vxc_dens_floor`.
-    let drop_full_pol = matches!(name, "hyb_gga_xc_wb97x_v");
+    // The B97 power-series functionals (gga_xc_b97_3c and the constructor-corpus
+    // hyb_gga_xc_b97) share ωB97X-V's raw per-spin x_σ² B97 correlation, so the
+    // same exact-full-polarization floored-edge and extreme-low-density
+    // exclusions apply (FFI-measured: minority vrho rel ~1e-4…2e-5 at the
+    // floored n_σ = 0 edge; energy and the physical near-edge points match).
+    let drop_full_pol = matches!(
+        name,
+        "hyb_gga_xc_wb97x_v" | "gga_xc_b97_3c" | "hyb_gga_xc_b97"
+    );
     let dens_floor = match name {
-        "hyb_gga_xc_wb97x_v" => 1e-12,
+        "hyb_gga_xc_wb97x_v" | "gga_xc_b97_3c" | "hyb_gga_xc_b97" => 1e-12,
         _ => 0.0,
     };
     let pol: Vec<(f64, f64, f64, f64, f64)> = pol_all

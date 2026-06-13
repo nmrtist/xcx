@@ -114,6 +114,52 @@ impl GgaEnergy for GgaCPbe {
     }
 }
 
+/// User-parameterized PBE correlation (behind [`crate::Functional::pbe_c`]):
+/// the identical shared [`pbe_c_energy`] the named PBE-c family (PBE / PBEsol)
+/// routes through, with β caller-supplied (γ stays the PBE constant
+/// `(1 − ln 2)/π²`, as in every published β-modified PBE-c). `pbe_c(BETA)` is
+/// **bit-identical** to `gga_c_pbe` (pinned by
+/// [`tests::param_recovers_named_pbe_c_family_bitwise`]). PBEh-3c's modified
+/// correlation (β = 0.03; Grimme et al., J. Chem. Phys. 143, 054107 (2015))
+/// is built from this.
+pub(crate) struct GgaCPbeParam {
+    info: FunctionalInfo,
+    zeta_threshold: f64,
+    beta: f64,
+}
+
+impl GgaCPbeParam {
+    /// Box a parameterized PBE correlation with gradient coefficient `beta`
+    /// (PBE 0.06672455060314922; PBEsol 0.046; PBEh-3c 0.03).
+    pub(crate) fn boxed(beta: f64) -> Box<dyn XcEval> {
+        Box::new(Gga(Self {
+            info: FunctionalInfo {
+                id: None,
+                name: "gga_c_pbe_param",
+                family: Family::Gga,
+                kind: Kind::Correlation,
+                needs_sigma: true,
+                needs_lapl: false,
+                needs_tau: false,
+                dens_threshold: 1e-12, // libxc gga_c_pbe family threshold
+                hybrid: None,
+            },
+            zeta_threshold: f64::EPSILON,
+            beta,
+        }))
+    }
+}
+
+impl GgaEnergy for GgaCPbeParam {
+    fn info(&self) -> &FunctionalInfo {
+        &self.info
+    }
+
+    fn f<N: DualNum<f64> + Copy>(&self, v: GgaVars<N>) -> N {
+        pbe_c_energy(v.rs, v.z, v.xt2, self.zeta_threshold, self.beta)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{A_MOD, FPP_VWN};
@@ -222,6 +268,42 @@ mod tests {
         let z = (na - nb) / (na + nb);
         let want = pw92_ec(rs, z, zt, &A_MOD, FPP_VWN);
         assert!((got - want).abs() <= 1e-10 * want.abs());
+    }
+
+    /// The public parameterized constructor must reproduce both named PBE-c
+    /// family members **bitwise** when given the published β — the
+    /// bit-stability guarantee that the named functionals and `pbe_c` share
+    /// one code path: PBE (β = 0.06672455060314922) and PBEsol (β = 0.046).
+    /// Checked on exc/vrho/vsigma and the full fxc tensor, both spin modes.
+    /// β → β_PBE parameter continuity is this same identity.
+    #[test]
+    fn param_recovers_named_pbe_c_family_bitwise() {
+        let cases: &[(crate::FunctionalId, f64)] = &[
+            (crate::FunctionalId::GgaCPbe, super::BETA),
+            (crate::FunctionalId::GgaCPbeSol, 0.046),
+        ];
+        for &(id, beta) in cases {
+            for &spin in &[Spin::Unpolarized, Spin::Polarized] {
+                let named = Functional::new(id, spin).unwrap();
+                let param = Functional::pbe_c(beta, spin);
+                let (rho, sigma): (&[f64], &[f64]) = match spin {
+                    Spin::Unpolarized => (&[0.5, 2.0, 1e-3], &[0.1, 5.0, 1e-8]),
+                    Spin::Polarized => (
+                        &[0.6, 0.3, 1.0, 1e-4, 100.0, 50.0],
+                        &[0.1, 0.05, 0.08, 0.2, 0.0, 1e-6, 1e3, 500.0, 800.0],
+                    ),
+                };
+                let np = rho.len() / spin.channels();
+                let a = named.eval_fxc(np, &XcInput::gga(rho, sigma)).unwrap();
+                let b = param.eval_fxc(np, &XcInput::gga(rho, sigma)).unwrap();
+                assert_eq!(a.exc, b.exc, "{id:?} {spin:?} exc");
+                assert_eq!(a.vrho, b.vrho, "{id:?} {spin:?} vrho");
+                assert_eq!(a.vsigma, b.vsigma, "{id:?} {spin:?} vsigma");
+                assert_eq!(a.v2rho2, b.v2rho2, "{id:?} {spin:?} v2rho2");
+                assert_eq!(a.v2rhosigma, b.v2rhosigma, "{id:?} {spin:?} v2rhosigma");
+                assert_eq!(a.v2sigma2, b.v2sigma2, "{id:?} {spin:?} v2sigma2");
+            }
+        }
     }
 
     #[test]

@@ -115,6 +115,58 @@ impl GgaEnergy for GgaXPbe {
     }
 }
 
+/// User-parameterized PBE exchange (behind [`crate::Functional::pbe_x`]):
+/// the identical shared skeleton ([`gga_exchange`] + [`pbe_enhancement`]) the
+/// named PBE-x family (PBE / revPBE / PBEsol-x) routes through, with κ and μ
+/// caller-supplied. `mu_x2s2 = μ·X2S²` is formed exactly as the named
+/// functionals' constants are (`MU·X2S·X2S`), so `pbe_x(0.8040, MU)` is
+/// **bit-identical** to `gga_x_pbe` (pinned by
+/// [`tests::param_recovers_named_pbe_x_family_bitwise`]). PBEh-3c's modified
+/// exchange (κ = 1.0245, μ = 10/81; Grimme et al., J. Chem. Phys. 143, 054107
+/// (2015)) is built from this.
+pub(crate) struct GgaXPbeParam {
+    info: FunctionalInfo,
+    zeta_threshold: f64,
+    kappa: f64,
+    mu_x2s2: f64,
+}
+
+impl GgaXPbeParam {
+    /// Box a parameterized PBE exchange with asymptotic bound `kappa` and
+    /// gradient coefficient `mu` (the literature s-space μ, e.g. PBE's
+    /// 0.06672455060314922·π²/3 or PBEsol's 10/81).
+    pub(crate) fn boxed(kappa: f64, mu: f64) -> Box<dyn XcEval> {
+        Box::new(Gga(Self {
+            info: FunctionalInfo {
+                id: None,
+                name: "gga_x_pbe_param",
+                family: Family::Gga,
+                kind: Kind::Exchange,
+                needs_sigma: true,
+                needs_lapl: false,
+                needs_tau: false,
+                dens_threshold: 1e-15,
+                hybrid: None,
+            },
+            zeta_threshold: f64::EPSILON,
+            kappa,
+            mu_x2s2: mu * X2S * X2S,
+        }))
+    }
+}
+
+impl GgaEnergy for GgaXPbeParam {
+    fn info(&self) -> &FunctionalInfo {
+        &self.info
+    }
+
+    fn f<N: DualNum<f64> + Copy>(&self, v: GgaVars<N>) -> N {
+        gga_exchange(&v, self.info.dens_threshold, self.zeta_threshold, |t| {
+            pbe_enhancement(t, self.kappa, self.mu_x2s2)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{Functional, FunctionalId, Spin, XcInput};
@@ -236,6 +288,45 @@ mod tests {
         assert!((ou.exc[0] - op.exc[0]).abs() <= 1e-12 * ou.exc[0].abs());
         assert!((ou.vrho[0] - op.vrho[0]).abs() <= 1e-11 * ou.vrho[0].abs());
         assert!((ou.vrho[0] - op.vrho[1]).abs() <= 1e-11 * ou.vrho[0].abs());
+    }
+
+    /// The public parameterized constructor must reproduce every named PBE-x
+    /// family member **bitwise** when given its published (κ, μ) — the
+    /// bit-stability guarantee that the named functionals and `pbe_x` share one
+    /// code path: PBE (κ = 0.8040, μ = MU_PBE), revPBE (κ = 1.245), PBEsol
+    /// (μ = 10/81). Checked on exc/vrho/vsigma and the full fxc tensor, both
+    /// spin modes. Also: κ→κ_PBE, μ→μ_PBE parameter continuity is this same
+    /// identity (recovers PBE exactly).
+    #[test]
+    fn param_recovers_named_pbe_x_family_bitwise() {
+        use super::{KAPPA, MU};
+        let cases: &[(crate::FunctionalId, f64, f64)] = &[
+            (crate::FunctionalId::GgaXPbe, KAPPA, MU),
+            (crate::FunctionalId::GgaXPbeR, 1.245, MU),
+            (crate::FunctionalId::GgaXPbeSol, KAPPA, 10.0 / 81.0),
+        ];
+        for &(id, kappa, mu) in cases {
+            for &spin in &[Spin::Unpolarized, Spin::Polarized] {
+                let named = Functional::new(id, spin).unwrap();
+                let param = Functional::pbe_x(kappa, mu, spin);
+                let (rho, sigma): (&[f64], &[f64]) = match spin {
+                    Spin::Unpolarized => (&[0.5, 2.0, 1e-3], &[0.1, 5.0, 1e-8]),
+                    Spin::Polarized => (
+                        &[0.6, 0.3, 1.0, 0.0, 100.0, 50.0],
+                        &[0.1, 0.05, 0.08, 0.3, 0.0, 0.0, 1e3, 500.0, 800.0],
+                    ),
+                };
+                let np = rho.len() / spin.channels();
+                let a = named.eval_fxc(np, &XcInput::gga(rho, sigma)).unwrap();
+                let b = param.eval_fxc(np, &XcInput::gga(rho, sigma)).unwrap();
+                assert_eq!(a.exc, b.exc, "{id:?} {spin:?} exc");
+                assert_eq!(a.vrho, b.vrho, "{id:?} {spin:?} vrho");
+                assert_eq!(a.vsigma, b.vsigma, "{id:?} {spin:?} vsigma");
+                assert_eq!(a.v2rho2, b.v2rho2, "{id:?} {spin:?} v2rho2");
+                assert_eq!(a.v2rhosigma, b.v2rhosigma, "{id:?} {spin:?} v2rhosigma");
+                assert_eq!(a.v2sigma2, b.v2sigma2, "{id:?} {spin:?} v2sigma2");
+            }
+        }
     }
 
     #[test]

@@ -32,7 +32,8 @@ regenerated `testdata/*.json`.
 
 - **libxc-direct** (most snapshots): generated from the pinned libxc by
   functional name; `libxc_version` is e.g. `"6.1.0"`.
-- **libxc component mix** (double hybrids B2PLYP / revDSD-PBEP86 / PWPB95):
+- **libxc component mix** (double hybrids B2PLYP / revDSD-PBEP86 / PWPB95;
+  PBEh-3c via `xc_func_set_ext_params` kappa/mu/beta overrides on PBE-x/PBE-c):
   libxc ships no double hybrids, so the snapshot is the weighted sum of libxc
   *component* evaluations (PWPB95 with `xc_func_set_ext_params` overrides for
   its reoptimized mPW91/B95 parameters); `libxc_version` is tagged

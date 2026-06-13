@@ -114,6 +114,7 @@ libxc-compatible numeric id (xcx-private ids ≥ 100000 are marked \*).
 | GGA      | `gga_x_b88`        | 106 | Becke 88 exchange |
 | GGA      | `gga_c_lyp`        | 131 | Lee–Yang–Parr correlation |
 | GGA      | `gga_c_p86`        | 132 | Perdew 86 correlation (PZ81 + gradient term) |
+| GGA      | `gga_xc_b97_3c`    | 327 | B97-3c xc part (Becke-97 series refit; host adds D3/SRB) |
 | meta-GGA | `mgga_x_tpss`      | 202 | TPSS exchange |
 | meta-GGA | `mgga_c_tpss`      | 231 | TPSS correlation |
 | meta-GGA | `mgga_x_r2scan`    | 497 | r²SCAN exchange |
@@ -127,6 +128,7 @@ libxc-compatible numeric id (xcx-private ids ≥ 100000 are marked \*).
 | Hybrid   | `hyb_gga_xc_pbeh`  | 406 | PBE0 |
 | Hybrid   | `hyb_mgga_x_m06_2x`| 450 | M06-2X exchange (54% EXX) |
 | Hybrid   | `hyb_mgga_xc_pw6b95` | 451 | PW6B95 (28% EXX) |
+| Hybrid   | `hyb_gga_xc_pbeh_3c` | 100005* | PBEh-3c xc part (modified-PBE hybrid, 42% EXX; host adds gCP/D3) |
 | RS hybrid | `hyb_gga_xc_wb97x_v` | 466 | ωB97X-V (SR semilocal part; CAM + VV10 via metadata) |
 | RS hybrid | `hyb_mgga_xc_wb97m_v` | 531 | ωB97M-V (SR semilocal part; CAM + VV10 via metadata) |
 | Double hybrid | `hyb_gga_xc_b2plyp` | 100001* | B2PLYP (EXX 0.53; PT2 0.27/0.27 via metadata) |
@@ -134,10 +136,16 @@ libxc-compatible numeric id (xcx-private ids ≥ 100000 are marked \*).
 | Double hybrid | `hyb_mgga_xc_pwpb95` | 100003* | PWPB95 (EXX 0.50; SOS-PT2 0.269) |
 | Double hybrid | `hyb_mgga_xc_wb97m_2` | 100004* | ωB97M(2) (CAM + PT2 via metadata; clean-room) |
 
-\* The double-hybrid family is unique to xcx (libxc ships no double hybrids);
-these use the xcx-private id namespace (≥ 100000) documented in
+\* Functionals with no libxc counterpart (the double hybrids and PBEh-3c)
+use the xcx-private id namespace (≥ 100000) documented in
 `docs/api-convention.md`. xcx emits the scaled semilocal mix; the host adds
-EXX/CAM and the PT2 term from `double_hybrid()` metadata.
+EXX/CAM and (for double hybrids) the PT2 term from `double_hybrid()` metadata.
+
+Beyond the named functionals, three **parameterized public constructors**
+expose the underlying families as data: `Functional::pbe_x(κ, μ, spin)`,
+`Functional::pbe_c(β, spin)` (recover the named PBE-family members at their
+published parameters), and `Functional::b97_xc(c_x, c_ss, c_os, spin)`
+(the Becke-1997 power series, generic over the coefficient count).
 
 The meta-GGA Laplacian (`lapl`) path is planned via the same AD framework.
 

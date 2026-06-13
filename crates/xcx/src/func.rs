@@ -161,6 +161,19 @@ pub enum FunctionalId {
     /// scaled by the host as `c_VV10 = 1 − c_PT2 = 0.65904` (the paper's
     /// constraint). **Not in libxc**; xcx-private id 100004.
     HybMggaXcWb97m2,
+    /// B97-3c xc part (libxc 327, `gga_xc_b97_3c`): the Becke-1997 power
+    /// series refit by Brandenburg, Bannwarth, Hansen & Grimme, J. Chem.
+    /// Phys. 148, 064104 (2018) (Table I; three terms per series, **no exact
+    /// exchange** — a pure GGA). The composite method's D3(BJ)/ATM and SRB
+    /// corrections are the host's job; `dispersion()` is `None`.
+    GgaXcB973c,
+    /// PBEh-3c xc part (Grimme, Brandenburg, Bannwarth & Hansen, J. Chem.
+    /// Phys. 143, 054107 (2015)): global hybrid on modified PBE —
+    /// `0.58·PBE-x(κ = 1.0245, μ = 10/81) + PBE-c(β = 0.03)` semilocal mix,
+    /// EXX 0.42 via metadata. The composite method's gCP and D3 corrections
+    /// are the host's job; `dispersion()` is `None`. **Not in libxc 6.1.0**;
+    /// xcx-private id 100005.
+    HybGgaXcPbeh3c,
 }
 
 impl FunctionalId {
@@ -201,13 +214,16 @@ impl FunctionalId {
             HybGgaXcRevdsdPbep86D4,
             HybMggaXcPwpb95,
             HybMggaXcWb97m2,
+            GgaXcB973c,
+            HybGgaXcPbeh3c,
         ]
     };
 
     /// The libxc numeric id — except for functionals **absent from libxc**
     /// (libxc ships no double hybrids), which use the xcx-private namespace
     /// `≥ 100000` (far above libxc's id range, currently < 1000): B2PLYP
-    /// (100001), revDSD-PBEP86-D4 (100002), PWPB95 (100003), ωB97M(2) (100004).
+    /// (100001), revDSD-PBEP86-D4 (100002), PWPB95 (100003), ωB97M(2) (100004),
+    /// PBEh-3c (100005 — libxc 6.1.0 ships B97-3c but not PBEh-3c).
     /// Should libxc ever add them, `from_name` keeps resolving the canonical
     /// names; the numeric values stay xcx-private.
     pub fn as_u32(self) -> u32 {
@@ -246,6 +262,8 @@ impl FunctionalId {
             HybGgaXcRevdsdPbep86D4 => 100_002,
             HybMggaXcPwpb95 => 100_003,
             HybMggaXcWb97m2 => 100_004,
+            GgaXcB973c => 327,
+            HybGgaXcPbeh3c => 100_005,
         }
     }
 
@@ -291,6 +309,8 @@ impl FunctionalId {
             HybGgaXcRevdsdPbep86D4 => "hyb_gga_xc_revdsd_pbep86_d4",
             HybMggaXcPwpb95 => "hyb_mgga_xc_pwpb95",
             HybMggaXcWb97m2 => "hyb_mgga_xc_wb97m_2",
+            GgaXcB973c => "gga_xc_b97_3c",
+            HybGgaXcPbeh3c => "hyb_gga_xc_pbeh_3c",
         }
     }
 
@@ -334,6 +354,8 @@ impl FunctionalId {
             }
             "hyb_mgga_xc_pwpb95" | "pwpb95" => HybMggaXcPwpb95,
             "hyb_mgga_xc_wb97m_2" | "wb97m(2)" | "wb97m-2" | "wb97m_2" => HybMggaXcWb97m2,
+            "gga_xc_b97_3c" | "b97-3c" | "b97_3c" => GgaXcB973c,
+            "hyb_gga_xc_pbeh_3c" | "pbeh-3c" | "pbeh_3c" | "pbeh3c" => HybGgaXcPbeh3c,
             _ => return None,
         })
     }
@@ -635,6 +657,60 @@ impl Functional {
     pub fn by_name(name: &str, spin: Spin) -> Result<Self, XcError> {
         let id = FunctionalId::from_name(name).ok_or(XcError::UnknownFunctional)?;
         Self::new(id, spin)
+    }
+
+    /// Construct a **parameterized PBE exchange** with asymptotic enhancement
+    /// bound `kappa` and gradient coefficient `mu` (the literature s-space μ).
+    /// Perdew, Burke & Ernzerhof, *Phys. Rev. Lett.* **77**, 3865 (1996).
+    ///
+    /// Routes through the exact same code path as the named PBE-x family, so
+    /// the published parameter sets reproduce them **bitwise**: PBE
+    /// (κ = 0.8040, μ = 0.06672455060314922·π²/3), revPBE (κ = 1.245, same μ),
+    /// PBEsol (κ = 0.8040, μ = 10/81). PBEh-3c's modified exchange is
+    /// `pbe_x(1.0245, 10.0/81.0, …)` (Grimme et al., *J. Chem. Phys.* **143**,
+    /// 054107 (2015)).
+    pub fn pbe_x(kappa: f64, mu: f64, spin: Spin) -> Functional {
+        Functional {
+            spin,
+            eval: crate::functionals::pbe_x_param(kappa, mu),
+        }
+    }
+
+    /// Construct a **parameterized PBE correlation** with gradient coefficient
+    /// `beta` (γ stays the PBE constant `(1 − ln 2)/π²`, as in every published
+    /// β-modified PBE-c). Perdew, Burke & Ernzerhof, *Phys. Rev. Lett.* **77**,
+    /// 3865 (1996).
+    ///
+    /// Routes through the exact same code path as the named PBE-c family:
+    /// `pbe_c(0.06672455060314922, …)` is bitwise `gga_c_pbe`,
+    /// `pbe_c(0.046, …)` bitwise `gga_c_pbe_sol`. PBEh-3c's modified
+    /// correlation is `pbe_c(0.03, …)` (Grimme et al., *J. Chem. Phys.*
+    /// **143**, 054107 (2015)).
+    pub fn pbe_c(beta: f64, spin: Spin) -> Functional {
+        Functional {
+            spin,
+            eval: crate::functionals::pbe_c_param(beta),
+        }
+    }
+
+    /// Construct a **B97-type GGA exchange–correlation power series** (Becke,
+    /// *J. Chem. Phys.* **107**, 8554 (1997)): each ingredient is its parent
+    /// LDA times `g = Σ_k c_k·u^k`, `u = γs²/(1 + γs²)`, with Becke's fixed
+    /// γ_x = 0.004, γ_ss = 0.2, γ_os = 0.006 and caller-supplied series
+    /// coefficients (any truncation): `c_x` for exchange (on per-channel LDA
+    /// exchange), `c_ss` for same-spin and `c_os` for opposite-spin
+    /// correlation (on the Stoll split of standard PW92).
+    ///
+    /// This is the form behind B97/B97-1/B97-2/HCTH/B97-3c; the named
+    /// [`FunctionalId::GgaXcB973c`] is exactly this constructor with the
+    /// Brandenburg et al. 2018 Table-I coefficients. The series carries **no
+    /// exact exchange**; hybrid B97 variants are expressed by the host adding
+    /// EXX on top (e.g. the original B97's 0.1943).
+    pub fn b97_xc(c_x: &[f64], c_ss: &[f64], c_os: &[f64], spin: Spin) -> Functional {
+        Functional {
+            spin,
+            eval: crate::functionals::b97_series(c_x, c_ss, c_os),
+        }
     }
 
     /// Metadata for this functional.

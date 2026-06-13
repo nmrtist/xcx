@@ -280,7 +280,8 @@ impl FunctionalInfo {
 `FunctionalId::as_u32` equals the libxc numeric id **except** for functionals
 absent from libxc (no libxc release ships double hybrids): those use the
 xcx-private namespace `>= 100000` (far above libxc's range, currently < 1000):
-B2PLYP 100001, revDSD-PBEP86-D4 100002, PWPB95 100003, ωB97M(2) 100004. Names
+B2PLYP 100001, revDSD-PBEP86-D4 100002, PWPB95 100003, ωB97M(2) 100004,
+PBEh-3c 100005 (libxc 6.1.0 ships B97-3c, id 327, but not PBEh-3c). Names
 keep the libxc convention (`hyb_gga_xc_b2plyp`, …), so `from_name` stays
 forward-compatible should libxc ever add them.
 

@@ -478,7 +478,7 @@ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
 name = "xcx"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "approx",
  "libm",

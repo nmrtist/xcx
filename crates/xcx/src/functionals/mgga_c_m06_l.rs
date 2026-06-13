@@ -118,15 +118,20 @@ pub(crate) fn f_pw<N: DualNum<f64> + Copy>(rs: N, z: N, zeta_threshold: f64) -> 
     pw92_ec(rs, z, zeta_threshold, &A_MOD, FPP_VWN)
 }
 
-/// B97 GGA-correlation factor `b97_g(γ, c, x) = Σ_{i=0}^{4} c[i]·u^i`, `u =
+/// B97 GGA-correlation factor `b97_g(γ, c, x) = Σ_i c[i]·u^i`, `u =
 /// γ·x²/(1 + γ·x²)` (`b97.mpl` `b97_g`), via Horner. Takes the **squared** reduced
 /// gradient `w = x²` directly (sqrt-free): `u = γw/(1 + γw) ∈ [0, 1)` for `w ≥ 0`,
-/// so the polynomial is bounded and smooth.
-pub(crate) fn b97_g<N: DualNum<f64> + Copy>(gamma: f64, c: &[f64; 5], w: N) -> N {
+/// so the polynomial is bounded and smooth. Generic over the coefficient count
+/// (a slice, coercible from libxc's fixed 5-element arrays): the B97
+/// power-series family ([`super::gga_xc_b97`]) takes arbitrary truncations.
+/// The rev-Horner over a slice is bit-identical to the old fixed-array form
+/// (the leading `0·u + c_last` step is exact in IEEE-754), so every existing
+/// caller's golden values are unchanged.
+pub(crate) fn b97_g<N: DualNum<f64> + Copy>(gamma: f64, c: &[f64], w: N) -> N {
     let gw = N::from(gamma) * w;
     let u = gw / (N::from(1.0) + gw);
-    let mut p = N::from(c[4]);
-    for &ci in c[..4].iter().rev() {
+    let mut p = N::from(0.0);
+    for &ci in c.iter().rev() {
         p = p * u + N::from(ci);
     }
     p

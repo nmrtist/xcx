@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-06-13
+
+### Added
+- **B97 GGA power series + B97-3c.** New `Functional::b97_xc(c_x, c_ss, c_os,
+  spin)` public constructor for the Becke 1997 GGA xc form (e = e_LDA*g(s^2),
+  g = sum_k c_k*u^k, u = gamma*s^2/(1 + gamma*s^2); Becke's fixed gammas
+  0.004/0.2/0.006; generic over the coefficient count, so future B97 variants
+  are pure data), plus the named **`gga_xc_b97_3c`** (libxc id 327; the
+  Brandenburg/Bannwarth/Hansen/Grimme JCP 148, 064104 (2018) Table-I refit,
+  three terms per series, no exact exchange -- pure GGA rung). The composite
+  method's D3/SRB corrections are the host's job; `dispersion()` is `None`.
+  Golden-verified <= 1e-10 against pinned libxc 6.1.0 (incl. fxc, both spin
+  modes); the series *constructor* is additionally golden-verified against
+  libxc's original B97 (`hyb_gga_xc_b97`, 407) semilocal part via a new
+  `testdata/constructor/` corpus.
+- **Parameterized PBE constructors + PBEh-3c.** New `Functional::pbe_x(kappa,
+  mu, spin)` and `Functional::pbe_c(beta, spin)` public constructors exposing
+  the shared PBE machinery (`pbe_enhancement` / `pbe_c_energy`); at the
+  published parameters they reproduce the named PBE/revPBE/PBEsol functionals
+  **bitwise** (pinned by tests). Built on them, the named
+  **`hyb_gga_xc_pbeh_3c`** (xcx-private id 100005; Grimme et al., JCP 143,
+  054107 (2015)): semilocal mix `0.58*PBE-x(kappa = 1.0245, mu = 10/81) +
+  PBE-c(beta = 0.03)` with `exx_fraction = 0.42` via metadata (rung Hybrid;
+  `dispersion()` `None` -- the host adds gCP/D3). libxc 6.1.0 ships no
+  PBEh-3c, so its snapshot is a libxc **component mix** through
+  `xc_func_set_ext_params` (kappa/mu/beta overrides) -- genuinely
+  libxc-derived, <= 1e-10 incl. fxc, both spin modes.
+- `b97_g` (the shared B97 series helper) is now generic over the coefficient
+  count (slice instead of fixed 5-array); bit-identical for all existing
+  callers (golden suite unchanged).
+
 ## [0.3.0] - 2026-06-12
 
 ### Changed
@@ -180,6 +211,7 @@ Initial public release.
   end-to-end SCF cross-check on real integration grids, and a dependency-free
   fuzz gate asserting finiteness of every output across the physical input range.
 
+[0.3.1]: https://github.com/nmrtist/xcx/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/nmrtist/xcx/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nmrtist/xcx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nmrtist/xcx/releases/tag/v0.1.0

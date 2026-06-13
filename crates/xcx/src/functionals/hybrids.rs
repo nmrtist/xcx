@@ -103,6 +103,34 @@ pub(crate) fn b3lyp5() -> Result<Box<dyn XcEval>, XcError> {
     )
 }
 
+/// PBEh-3c (Grimme, Brandenburg, Bannwarth & Hansen, J. Chem. Phys. 143,
+/// 054107 (2015)): a global hybrid on **modified** PBE — exchange with
+/// κ = 1.0245 and μ = 10/81 (the PBEsol/gradient-expansion μ), correlation
+/// with β = 0.03 — and 42% exact exchange. Semilocal mix
+/// `0.58·PBE-x(κ = 1.0245, μ = 10/81) + 1.0·PBE-c(β = 0.03)`, EXX 0.42,
+/// built on the same parameterized PBE sources as the public
+/// [`crate::Functional::pbe_x`]/[`crate::Functional::pbe_c`] constructors.
+/// The composite method's gCP and D3 corrections are the host's job — xcx
+/// only evaluates the xc functional; `dispersion()` is `None`. **Not in
+/// libxc 6.1.0** (which ships only
+/// the B97-3c member of the 3c family); xcx-private id 100005.
+pub(crate) fn pbeh_3c() -> Result<Box<dyn XcEval>, XcError> {
+    const EXX: f64 = 0.42;
+    const KAPPA: f64 = 1.0245;
+    const MU_GE: f64 = 10.0 / 81.0;
+    const BETA: f64 = 0.03;
+    Ok(mixed_eval(
+        vec![
+            (
+                1.0 - EXX,
+                super::gga_x_pbe::GgaXPbeParam::boxed(KAPPA, MU_GE),
+            ),
+            (1.0, super::gga_c_pbe::GgaCPbeParam::boxed(BETA)),
+        ],
+        hyb_info(FunctionalId::HybGgaXcPbeh3c, "hyb_gga_xc_pbeh_3c", EXX),
+    ))
+}
+
 // --- Double hybrids (clean-room; absent from libxc — see func.rs id docs) ---
 //
 // xcx emits only the scaled semilocal XC mix; the host adds the EXX fraction
@@ -252,6 +280,59 @@ mod tests {
             h.exc[0],
             h5.exc[0]
         );
+    }
+
+    /// PBEh-3c: the semilocal mix `0.58·PBE-x(κ = 1.0245, μ = 10/81) +
+    /// PBE-c(β = 0.03)` (componentwise against the public parameterized
+    /// constructors), with exx_fraction = 0.42, rung Hybrid, dispersion None
+    /// (the host supplies the 3c gCP/D3 terms), level-3 grid.
+    #[test]
+    fn pbeh_3c_is_param_pbe_mix_with_exx_042() {
+        use crate::func::{DispersionModel, Rung};
+        let f = Functional::new(FunctionalId::HybGgaXcPbeh3c, Spin::Polarized).unwrap();
+        assert_eq!(f.exx_fraction(), 0.42);
+        assert_eq!(f.info().name, "hyb_gga_xc_pbeh_3c");
+        assert_eq!(f.info().rung(), Rung::Hybrid);
+        assert_eq!(f.info().dispersion(), None);
+        let g = f.info().grid();
+        assert_eq!((g.level, g.grid_sensitive), (3, false));
+        assert_ne!(
+            f.info().dispersion().map(|d| d.model),
+            Some(DispersionModel::D4)
+        );
+
+        let px = Functional::pbe_x(1.0245, 10.0 / 81.0, Spin::Polarized);
+        let pc = Functional::pbe_c(0.03, Spin::Polarized);
+        let r = [0.6, 0.3];
+        let s = [0.1, 0.05, 0.08];
+        let inp = XcInput::gga(&r, &s);
+        let h = f.eval_fxc(1, &inp).unwrap();
+        let ex = px.eval_fxc(1, &inp).unwrap();
+        let ec = pc.eval_fxc(1, &inp).unwrap();
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-14 * a.abs().max(1.0);
+        assert!(close(h.exc[0], 0.58 * ex.exc[0] + ec.exc[0]));
+        for k in 0..2 {
+            assert!(
+                close(h.vrho[k], 0.58 * ex.vrho[k] + ec.vrho[k]),
+                "vrho[{k}]"
+            );
+        }
+        for k in 0..3 {
+            assert!(
+                close(h.vsigma[k], 0.58 * ex.vsigma[k] + ec.vsigma[k]),
+                "vsigma[{k}]"
+            );
+        }
+        for k in 0..3 {
+            assert!(
+                close(h.v2rho2[k], 0.58 * ex.v2rho2[k] + ec.v2rho2[k]),
+                "v2rho2[{k}]"
+            );
+        }
+        // and it must differ from plain PBE0's semilocal part (modified κ/μ/β)
+        let pbe0 = Functional::new(FunctionalId::HybGgaXcPbeh, Spin::Polarized).unwrap();
+        let h0 = pbe0.eval(1, &inp).unwrap();
+        assert!((h.exc[0] - h0.exc[0]).abs() > 1e-6 * h.exc[0].abs());
     }
 
     /// σ_ab dependence comes only from PBE-c (exchange has none), so vsigma_ab is

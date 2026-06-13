@@ -1,6 +1,6 @@
 [package]
 name = "xcx"
-version = "0.3.0"
+version = "0.3.1"
 description = "Exchange–correlation functionals for DFT in pure Rust — autodiff derivatives (vxc/fxc), double hybrids, libxc-interoperable ids"
 keywords = ["dft", "quantum-chemistry", "libxc", "physics", "chemistry"]
 categories = ["science", "mathematics"]

@@ -13,5 +13,9 @@ cargo run -p xcx-validation --features libxc-ffi --bin gen_golden
 ```
 
 Each functional has a snapshot here, alongside the end-to-end SCF cross-check
-artifacts under `scf/` and the biased real-grid subsets `scf_grid_*.json`. The
+artifacts under `scf/` and the biased real-grid subsets `scf_grid_*.json`.
+`constructor/` holds corpora for the **public parameterized constructors**
+(libxc functionals not registered as xcx ids, e.g. the original B97 vs
+`Functional::b97_xc`), loaded by `tests/constructor.rs` instead of the
+by-name golden test. The
 golden test loads every committed `*.json` and compares against `xcx`.

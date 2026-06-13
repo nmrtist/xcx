@@ -24,6 +24,7 @@ mod gga_x_pbe;
 mod gga_x_pbe_r;
 mod gga_x_pbe_sol;
 mod gga_x_rpbe;
+mod gga_xc_b97;
 mod hyb_gga_xc_wb97x_v;
 mod hyb_mgga_x_m06_2x;
 mod hyb_mgga_xc_pw6b95;
@@ -85,5 +86,25 @@ pub(crate) fn build(id: FunctionalId) -> Result<Box<dyn XcEval>, XcError> {
         HybGgaXcRevdsdPbep86D4 => hybrids::revdsd_pbep86_d4(),
         HybMggaXcPwpb95 => hyb_mgga_xc_pwpb95::pwpb95(),
         HybMggaXcWb97m2 => Ok(hyb_mgga_xc_wb97m_2::HybMggaXcWb97m2::boxed()),
+        GgaXcB973c => Ok(gga_xc_b97::b97_3c()),
+        HybGgaXcPbeh3c => hybrids::pbeh_3c(),
     }
+}
+
+/// Parameterized PBE exchange (κ, μ) — the evaluator behind the public
+/// [`crate::Functional::pbe_x`] constructor (shared PBE-x code path).
+pub(crate) fn pbe_x_param(kappa: f64, mu: f64) -> Box<dyn XcEval> {
+    gga_x_pbe::GgaXPbeParam::boxed(kappa, mu)
+}
+
+/// Parameterized PBE correlation (β) — the evaluator behind the public
+/// [`crate::Functional::pbe_c`] constructor (shared PBE-c code path).
+pub(crate) fn pbe_c_param(beta: f64) -> Box<dyn XcEval> {
+    gga_c_pbe::GgaCPbeParam::boxed(beta)
+}
+
+/// B97 power series with caller-supplied coefficients — the evaluator behind
+/// the public [`crate::Functional::b97_xc`] constructor.
+pub(crate) fn b97_series(c_x: &[f64], c_ss: &[f64], c_os: &[f64]) -> Box<dyn XcEval> {
+    gga_xc_b97::b97_series(c_x, c_ss, c_os)
 }
